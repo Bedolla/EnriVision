@@ -1,9 +1,9 @@
 # EnriVision Status
 
-Last Updated: 2026-01-13
+Last Updated: 2026-06-19
 
 ## Current State
-- EnriVision is a client-side MCP server (npm: `@bedolla/enrivision`) exposing a single tool: `analyze_media`.
+- EnriVision is a client-side MCP server (npm: `@bedolla/enrivision`) exposing a single tool: `analyze_media`; the package is prepared as version `0.1.1`.
 - `analyze_media` uploads local file bytes to EnriProxy via resumable uploads (`/v1/uploads`) and triggers server-side analysis (`/v1/vision/analyze`).
 - Supports both single-file analysis (`path`) and multi-image analysis (`paths[]`). When `paths[]` is used, EnriVision uploads a single tar archive (`application/vnd.enrivision.media-set+tar`) to avoid per-key concurrent upload-session limits.
 - Supports multipass tuning via tool parameters (`analysis_mode`, `video`, `document`, `images`) while keeping client-side work limited to streaming bytes (no local ffmpeg/Whisper).
@@ -21,5 +21,5 @@ Last Updated: 2026-01-13
 - MCP tool schema no longer exposes per-call `server_url`, `api_key`, or `timeout_ms` overrides.
 
 ## Testing
-- Ran: `npm run build` (OK).
 - Ran: `npm test` (OK) - 3 files, 8 tests.
+- Ran: `npm run build` (OK).

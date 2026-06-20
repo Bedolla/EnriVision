@@ -2,6 +2,15 @@
 
 All notable changes to EnriVision are documented in this file.
 
+## 2026-06-19
+### Changed
+- Bumped package version to `0.1.1` for npm publishing.
+- Aligned the package Node.js engine requirement with the Enri runtime standard (`>=24`).
+- Updated the `analysis_mode` MCP schema with the explicit enum accepted by EnriProxy (`auto`, `single`, `multipass`).
+### Testing
+- Ran: `npm test` (OK) - 3 files, 8 tests.
+- Ran: `npm run build` (OK).
+
 ## 2026-01-13
 ### Tests
 - Added a regression test to ensure EnriVision strips internal extraction fields (e.g., `multipass`, `model`, and upload/routing identifiers) before returning tool output.

@@ -199,6 +199,7 @@ export class EnriVisionServer {
           },
           analysis_mode: {
             type: "string",
+            enum: ["auto", "single", "multipass"],
             description: "Optional analysis mode selector: auto, single, or multipass."
           },
           video: {
