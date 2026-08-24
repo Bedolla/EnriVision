@@ -1,10 +1,11 @@
 # EnriVision Status
 
-Last Updated: 2026-06-19
+Last Updated: 2026-08-24
 
 ## Current State
 - EnriVision is a client-side MCP server (npm: `@bedolla/enrivision`) exposing a single tool: `analyze_media`; the package is prepared as version `0.1.1`.
 - `analyze_media` uploads local file bytes to EnriProxy via resumable uploads (`/v1/uploads`) and triggers server-side analysis (`/v1/vision/analyze`).
+- Every model-facing string (tool description, parameter descriptions, errors, output envelope) is Spanish per the monorepo convention, and the description embeds UI-screenshot debugging guidance (verdict-first, zone-by-zone, hex colors, quantified layout defects, observed-vs-expected) mirroring EnriProxy's vision system prompt; wire field names are unchanged.
 - Supports both single-file analysis (`path`) and multi-image analysis (`paths[]`). When `paths[]` is used, EnriVision uploads a single tar archive (`application/vnd.enrivision.media-set+tar`) to avoid per-key concurrent upload-session limits.
 - Supports multipass tuning via tool parameters (`analysis_mode`, `video`, `document`, `images`) while keeping client-side work limited to streaming bytes (no local ffmpeg/Whisper).
 - Video clip targeting is supported via `video.clip_start_seconds` + `video.clip_duration_seconds` for time-specific questions.

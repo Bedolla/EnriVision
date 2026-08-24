@@ -2,6 +2,14 @@
 
 All notable changes to EnriVision are documented in this file.
 
+## 2026-08-24
+### Changed
+- Every model-facing string is now Spanish, matching the monorepo convention: the full `analyze_media` description (usage rules, when-to-use list) and every parameter description across the schema (`path`, `paths`, `context`, `question`, `language`, `max_frames`, `transcribe`, `transcription_language`, `analysis_mode`, and the `video`/`document`/`audio`/`images` tuning objects), plus tool validation errors, upload/analysis errors, the unknown-tool server message, and the output envelope (`ANÁLISIS (tipo):`). Wire field names and the EnriProxy contract are unchanged.
+- The tool description now carries UI-screenshot debugging guidance mirroring EnriProxy's vision system prompt: for application captures, open with a one-line verdict, describe zone by zone (header/sidebar/content/modals/notifications), approximate colors as hex and flag inconsistencies, quantify layout defects (overflow, clipping, overlap, misalignment, cut-off text) with pixel estimates, transcribe visible labels/errors verbatim, and compare observed vs expected when the caller stated an expectation — so non-Enri clients (OpenCode/Codex CLI with third-party models) get the same UI-debugging quality without EnriCode's coaching.
+### Testing
+- Ran: `npm test` (OK) - 3 files, 8 tests.
+- Ran: `npm run typecheck` and `npm run build` (OK).
+
 ## 2026-06-19
 ### Changed
 - Bumped package version to `0.1.1` for npm publishing.

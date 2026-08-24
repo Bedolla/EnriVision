@@ -13,7 +13,7 @@ describe("AnalyzeMediaTool.parseParams", () => {
       defaultTimeoutMs: 1000
     });
 
-    expect(() => tool.parseParams({ path: "relative.mp4" })).toThrow(/absolute/i);
+    expect(() => tool.parseParams({ path: "relative.mp4" })).toThrow(/absoluta|absolute/i);
   });
 
   it("maps snake_case fields to params", () => {

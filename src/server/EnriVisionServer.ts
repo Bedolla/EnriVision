@@ -97,7 +97,7 @@ export class EnriVisionServer {
       if (request.params.name !== "analyze_media") {
         return {
           isError: true,
-          content: [{ type: "text", text: `Unknown tool: ${request.params.name}` }]
+          content: [{ type: "text", text: `Herramienta desconocida: ${request.params.name}` }]
         } satisfies CallToolResult;
       }
 
@@ -111,7 +111,7 @@ export class EnriVisionServer {
           content: [
             {
               type: "text",
-              text: `ANALYSIS (${result.media_type}):\n${result.analysis}`
+              text: `ANÁLISIS (${result.media_type}):\n${result.analysis}`
             }
           ],
           structuredContent: result
@@ -135,38 +135,46 @@ export class EnriVisionServer {
     return {
       name: "analyze_media",
       description:
-        "Upload and analyze a local file via EnriProxy (server-side extraction + model analysis).\n" +
+        "Sube y analiza un archivo local mediante EnriProxy (extracción del lado servidor + análisis con modelo).\n" +
         "\n" +
-        "When to use:\n" +
-        "- Large PDFs (many pages) or scanned PDFs where client-side Read may truncate or miss content.\n" +
-        "- Video/audio or other binary media your client cannot Read.\n" +
-        "- Audio files in common formats (mp3, wav, flac, m4a, aac, ogg/oga, opus, wma, weba, mka, aiff/aif/aifc, caf, m4b/m4r, mp1/mp2/mpa/mpga).\n" +
-        "- HEIC/AVIF/TIFF/APNG/SVG/Office docs when your client Read is unreliable.\n" +
-        "- Very large files where resumable uploads are required (up to 4GB).\n" +
-        "- Large PDFs/videos: set `analysis_mode` to 'multipass' for better coverage (auto prefers multipass for PDFs > 20 pages).\n" +
-        "- For time-specific video questions (e.g., \"what happens at 12:34?\"), set `video.clip_start_seconds` and `video.clip_duration_seconds`.\n" +
+        "Cuándo usarla:\n" +
+        "- PDFs grandes (muchas páginas) o escaneados donde el Read del cliente puede truncar o perder contenido.\n" +
+        "- Video/audio u otros medios binarios que su cliente no puede leer con Read.\n" +
+        "- Archivos de audio en formatos comunes (mp3, wav, flac, m4a, aac, ogg/oga, opus, wma, weba, mka, aiff/aif/aifc, caf, m4b/m4r, mp1/mp2/mpa/mpga).\n" +
+        "- HEIC/AVIF/TIFF/APNG/SVG/documentos de Office cuando el Read del cliente es poco confiable.\n" +
+        "- Archivos muy grandes que requieren subidas reanudables (hasta 4GB).\n" +
+        "- PDFs/videos grandes: use `analysis_mode` = 'multipass' para mejor cobertura (auto prefiere multipass para PDFs de más de 20 páginas).\n" +
+        "- Para preguntas de video en un tiempo específico (por ejemplo, \"¿qué pasa en 12:34?\"), use `video.clip_start_seconds` y `video.clip_duration_seconds`.\n" +
         "\n" +
-        "Rules:\n" +
-        "- Use `path` for one file, or `paths` for multiple images (UI screenshots/photo sets).\n" +
-        "- `path`/`paths` are absolute paths on the machine running this MCP server (the client).\n" +
-        "- Requires a valid EnriProxy API key (env `ENRIPROXY_API_KEY`, sent as Authorization: Bearer ...).\n" +
-        "- Prefer the client's native Read tool only for small/simple text/PDF/common images when it works; prefer this tool for large PDFs.\n" +
-        "- Answer strictly from the tool output; if frames/transcript are missing, say so.\n" +
-        "- Video: frames + transcript belong to the SAME video timeline (not unrelated images).\n" +
-        "- Animated GIF/WebP/APNG/SVG inputs are converted into representative key frames.\n" +
-        "- Set `language` (e.g., 'es') to match the user request and avoid language drift.",
+        "Reglas:\n" +
+        "- Use `path` para un archivo, o `paths` para varias imágenes (capturas de UI/sets de fotos).\n" +
+        "- `path`/`paths` son rutas absolutas en la máquina donde corre este servidor MCP (el cliente).\n" +
+        "- Requiere una API key válida de EnriProxy (env `ENRIPROXY_API_KEY`, enviada como Authorization: Bearer ...).\n" +
+        "- Prefiera el Read nativo del cliente sólo para texto/PDF/imágenes comunes pequeños y simples cuando funcione; prefiera esta herramienta para PDFs grandes.\n" +
+        "- Responda estrictamente con la salida de la herramienta; si faltan fotogramas/transcripción, dígalo.\n" +
+        "- Video: los fotogramas y la transcripción pertenecen a la MISMA línea de tiempo del video (no son imágenes sin relación).\n" +
+        "- Los GIF/WebP/APNG/SVG animados se convierten en fotogramas clave representativos.\n" +
+        "- Establezca `language` (por ejemplo, 'es') para coincidir con el idioma del usuario y evitar deriva de idioma.\n" +
+        "\n" +
+        "Depuración de capturas de UI (cuando el material sean capturas de pantalla de aplicaciones):\n" +
+        "- Abra con un veredicto de una línea en lenguaje claro (por ejemplo, 'el formulario de login renderiza correctamente' o 'el header se solapa con la barra lateral').\n" +
+        "- Describa zona por zona (header, barra lateral, contenido principal, modales, notificaciones), no como escena general.\n" +
+        "- Aproxime los colores como valores hex (por ejemplo, #1F6FEB) y nómbrelos; señale colores inesperados o inconsistentes.\n" +
+        "- Cuantifique defectos de layout: desbordes, recortes, solapamientos, desalineaciones, espaciados faltantes, texto cortado; estime magnitudes en píxeles cuando sea posible.\n" +
+        "- Transcriba textualmente etiquetas, botones y cualquier mensaje de error o estado visible.\n" +
+        "- Si la solicitud indica qué se esperaba, compare observado vs esperado de forma explícita.",
       inputSchema: {
         type: "object",
         properties: {
           path: {
             type: "string",
             description:
-              "Absolute path to a local file on the machine running the MCP server (e.g., C:\\\\Users\\\\User\\\\Downloads\\\\video.mp4)."
+              "Ruta absoluta a un archivo local en la máquina donde corre el servidor MCP (por ejemplo, C:\\\\Users\\\\User\\\\Downloads\\\\video.mp4)."
           },
           paths: {
             type: "array",
             description:
-              "Absolute paths to multiple local image files (UI screenshots/photo sets). When provided, EnriVision uploads a single media-set archive for server-side batching + reduce.",
+              "Rutas absolutas a varios archivos de imagen locales (capturas de UI/sets de fotos). Cuando se proporcionan, EnriVision sube un único archivo de conjunto para procesamiento por lotes y reducción del lado servidor.",
             items: {
               type: "string"
             }
@@ -174,115 +182,116 @@ export class EnriVisionServer {
           context: {
             type: "string",
             description:
-              "Optional analysis hint: ui, diagram, chart, error, code, meeting, tutorial, photo. Leave empty for auto-detection."
+              "Pista opcional de análisis: ui, diagram, chart, error, code, meeting, tutorial, photo. Déjelo vacío para detección automática."
           },
           question: {
             type: "string",
-            description: "Optional explicit question to answer about the file."
+            description: "Pregunta explícita opcional que responder sobre el archivo."
           },
           language: {
             type: "string",
-            description: "Preferred response language code (ISO 639-1), e.g. 'es', 'en'."
+            description: "Código de idioma preferido de respuesta (ISO 639-1), por ejemplo 'es', 'en'."
           },
           max_frames: {
             type: "integer",
             description:
-              "Optional max frames for videos (1-20) in single-pass mode. For targeted timestamps, prefer video.clip_start_seconds + video.clip_duration_seconds. For multipass, use video.max_frames_per_segment."
+              "Máximo opcional de fotogramas para videos (1-20) en modo single-pass. Para tiempos específicos, prefiera video.clip_start_seconds + video.clip_duration_seconds. Para multipass, use video.max_frames_per_segment."
           },
           transcribe: {
             type: "boolean",
-            description: "Optional override to enable/disable audio transcription for videos."
+            description: "Sobreescritura opcional para activar/desactivar la transcripción de audio en videos."
           },
           transcription_language: {
             type: "string",
-            description: "Optional Whisper language hint for audio/video transcription (e.g., 'auto', 'es', 'en')."
+            description:
+              "Pista opcional de idioma para la transcripción de audio/video (por ejemplo, 'auto', 'es', 'en')."
           },
           analysis_mode: {
             type: "string",
             enum: ["auto", "single", "multipass"],
-            description: "Optional analysis mode selector: auto, single, or multipass."
+            description: "Selector opcional de modo de análisis: auto, single o multipass."
           },
           video: {
             type: "object",
-            description: "Optional video multipass tuning. Used only when analyzing videos.",
+            description: "Ajuste opcional de multipass para video. Se usa sólo al analizar videos.",
             properties: {
               clip_start_seconds: {
                 type: "number",
-                description: "Optional clip start offset in seconds for time-targeted video analysis."
+                description: "Offset opcional de inicio del clip en segundos para análisis de video dirigido a un tiempo."
               },
               clip_duration_seconds: {
                 type: "number",
-                description: "Optional clip duration in seconds for time-targeted video analysis."
+                description: "Duración opcional del clip en segundos para análisis de video dirigido a un tiempo."
               },
               segment_seconds: {
                 type: "number",
-                description: "Segment duration in seconds."
+                description: "Duración del segmento en segundos."
               },
               max_segments: {
                 type: "integer",
-                description: "Maximum number of segments to analyze."
+                description: "Número máximo de segmentos a analizar."
               },
               max_frames_per_segment: {
                 type: "integer",
-                description: "Maximum frames to extract per segment."
+                description: "Máximo de fotogramas a extraer por segmento."
               }
             }
           },
           document: {
             type: "object",
-            description: "Optional document multipass tuning (PDF).",
+            description: "Ajuste opcional de multipass para documentos (PDF).",
             properties: {
               max_pages_total: {
                 type: "integer",
-                description: "Maximum number of pages to analyze in total."
+                description: "Número máximo de páginas a analizar en total."
               },
               pages_per_batch: {
                 type: "integer",
-                description: "Pages per batch for multipass map calls."
+                description: "Páginas por lote para las llamadas map de multipass."
               },
               max_images_per_batch: {
                 type: "integer",
-                description: "Maximum rendered pages (images) per batch."
+                description: "Máximo de páginas renderizadas (imágenes) por lote."
               },
               scanned_text_threshold_chars: {
                 type: "integer",
-                description: "Minimum extracted text length to treat a page as textual."
+                description: "Longitud mínima de texto extraído para tratar una página como textual."
               }
             }
           },
           audio: {
             type: "object",
-            description: "Optional audio multipass tuning (used only when analyzing audio files).",
+            description: "Ajuste opcional de multipass para audio (se usa sólo al analizar archivos de audio).",
             properties: {
               timestamps: {
                 type: "boolean",
-                description: "Whether to include timestamped segments in audio extraction."
+                description: "Si incluir segmentos con marca de tiempo en la extracción de audio."
               },
               segment_seconds: {
                 type: "number",
-                description: "Segment duration in seconds for audio multipass."
+                description: "Duración del segmento en segundos para multipass de audio."
               },
               max_segments: {
                 type: "integer",
-                description: "Maximum number of audio segments to analyze."
+                description: "Número máximo de segmentos de audio a analizar."
               }
             }
           },
           images: {
             type: "object",
-            description: "Optional image-set multipass tuning (used only with `paths`).",
+            description: "Ajuste opcional de multipass para conjuntos de imágenes (se usa sólo con `paths`).",
             properties: {
               max_images_total: {
                 type: "integer",
-                description: "Maximum number of images to analyze in total."
+                description: "Número máximo de imágenes a analizar en total."
               },
               images_per_batch: {
                 type: "integer",
-                description: "Images per batch for multipass map calls."
+                description: "Imágenes por lote para las llamadas map de multipass."
               },
               max_dimension: {
                 type: "integer",
-                description: "Maximum dimension for images (width/height)."
+                description: "Dimensión máxima para las imágenes (ancho/alto)."
               }
             }
           }

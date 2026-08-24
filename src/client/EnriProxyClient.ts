@@ -203,7 +203,7 @@ export class EnriProxyClient {
     const result = await this.requestJson("POST", url, payload, this.timeoutMs);
     if (result.status < 200 || result.status >= 300) {
       throw new EnriProxyHttpError(
-        `Failed to create upload session (HTTP ${result.status}).`,
+        `Falló la creación de la sesión de subida (HTTP ${result.status}).`,
         result.status,
         result.headers,
         result.body
@@ -225,7 +225,7 @@ export class EnriProxyClient {
     const result = await this.requestRaw("HEAD", url, undefined, undefined, this.timeoutMs);
     if (result.status < 200 || result.status >= 300) {
       throw new EnriProxyHttpError(
-        `Failed to query upload offset (HTTP ${result.status}).`,
+        `Falló la consulta del offset de subida (HTTP ${result.status}).`,
         result.status,
         result.headers,
         result.body
@@ -284,7 +284,7 @@ export class EnriProxyClient {
     const result = await this.requestRaw("PATCH", url, headers, params.chunk, timeoutMs);
     if (result.status < 200 || result.status >= 300) {
       throw new EnriProxyHttpError(
-        `Failed to upload chunk (HTTP ${result.status}).`,
+        `Falló la subida del fragmento (HTTP ${result.status}).`,
         result.status,
         result.headers,
         result.body
@@ -547,7 +547,7 @@ export class EnriProxyClient {
     const result = await this.requestJson("POST", url, payload, this.timeoutMs);
     if (result.status < 200 || result.status >= 300) {
       throw new EnriProxyHttpError(
-        `Vision analysis failed (HTTP ${result.status}).`,
+        `El análisis de visión falló (HTTP ${result.status}).`,
         result.status,
         result.headers,
         result.body
@@ -655,7 +655,7 @@ export class EnriProxyClient {
           res.on("data", (chunk: Buffer) => {
             received += chunk.length;
             if (received > maxResponseBytes) {
-              req.destroy(new Error("Response exceeded maximum allowed size."));
+              req.destroy(new Error("La respuesta excedió el tamaño máximo permitido."));
               return;
             }
             chunks.push(chunk);
@@ -674,7 +674,7 @@ export class EnriProxyClient {
       req.on("error", (error) => reject(error));
 
       req.setTimeout(timeoutMs, () => {
-        req.destroy(new Error(`Request timed out after ${timeoutMs}ms`));
+        req.destroy(new Error(`La petición expiró después de ${timeoutMs}ms`));
       });
 
       if (body && body.length > 0 && method !== "HEAD") {

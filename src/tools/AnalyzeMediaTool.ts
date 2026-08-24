@@ -279,14 +279,14 @@ export class AnalyzeMediaTool {
     const pathRaw = typeof obj["path"] === "string" ? obj["path"].trim() : "";
     const path = pathRaw ? pathRaw : undefined;
     if (path && !isAbsolute(path)) {
-      throw new Error("path must be an absolute file path.");
+      throw new Error("path debe ser una ruta de archivo absoluta.");
     }
 
     const pathsRaw = obj["paths"];
     let paths: string[] | undefined;
     if (typeof pathsRaw !== "undefined") {
       if (!Array.isArray(pathsRaw)) {
-        throw new Error("paths must be an array of absolute file paths.");
+        throw new Error("paths debe ser un arreglo de rutas de archivo absolutas.");
       }
       const out: string[] = [];
       for (const item of pathsRaw) {
@@ -295,7 +295,7 @@ export class AnalyzeMediaTool {
         }
         const p = item.trim();
         if (!isAbsolute(p)) {
-          throw new Error("paths must contain only absolute file paths.");
+          throw new Error("paths debe contener sólo rutas de archivo absolutas.");
         }
         out.push(p);
       }
@@ -305,7 +305,7 @@ export class AnalyzeMediaTool {
     }
 
     if (!path && (!paths || paths.length === 0)) {
-      throw new Error("Provide either 'path' or 'paths'.");
+      throw new Error("Proporcione 'path' o 'paths'.");
     }
     const context = optionalString(obj["context"]);
     const question = optionalString(obj["question"]);
@@ -320,7 +320,7 @@ export class AnalyzeMediaTool {
         ? analysisModeRaw
         : analysisModeRaw
           ? (() => {
-              throw new Error("analysis_mode must be one of: auto|single|multipass.");
+              throw new Error("analysis_mode debe ser uno de: auto|single|multipass.");
             })()
           : undefined;
 
@@ -411,7 +411,7 @@ export class AnalyzeMediaTool {
           : [];
 
     if (resolvedPaths.length === 0) {
-      throw new Error("Provide either 'path' or 'paths'.");
+      throw new Error("Proporcione 'path' o 'paths'.");
     }
 
     let uploadId: string;
@@ -438,7 +438,7 @@ export class AnalyzeMediaTool {
 
       const finalOffset = await this.uploadFileResumable(client, singlePath, fileSize, session, timeoutMs);
       if (finalOffset !== fileSize) {
-        throw new Error(`Upload incomplete: sent ${finalOffset} of ${fileSize} bytes.`);
+        throw new Error(`Subida incompleta: se enviaron ${finalOffset} de ${fileSize} bytes.`);
       }
 
       uploadId = session.upload_id;
@@ -554,12 +554,12 @@ export class AnalyzeMediaTool {
    */
   private async assertReadableFile(filePath: string): Promise<number> {
     if (!existsSync(filePath)) {
-      throw new Error(`File not found: ${filePath}`);
+      throw new Error(`Archivo no encontrado: ${filePath}`);
     }
 
     const st = await stat(filePath);
     if (!st.isFile()) {
-      throw new Error(`Not a file: ${filePath}`);
+      throw new Error(`No es un archivo: ${filePath}`);
     }
 
     // Ensure the file is readable.
@@ -625,7 +625,7 @@ export class AnalyzeMediaTool {
       const contentType = this.detectMimeType(p);
 
       if (!contentType.toLowerCase().startsWith("image/")) {
-        throw new Error(`paths must contain only image files. Not an image: ${p} (${contentType})`);
+        throw new Error(`paths debe contener sólo archivos de imagen. No es imagen: ${p} (${contentType})`);
       }
 
       const extRaw = extname(filename).toLowerCase();
@@ -726,12 +726,12 @@ export class AnalyzeMediaTool {
       }
 
       if (!madeProgress) {
-        throw new Error("Upload stalled: no progress while sending tar chunks.");
+        throw new Error("Subida estancada: no hubo progreso al enviar los fragmentos del tar.");
       }
     }
 
     if (offset !== tarSizeBytes) {
-      throw new Error(`Upload incomplete: sent ${offset} of ${tarSizeBytes} bytes.`);
+      throw new Error(`Subida incompleta: se enviaron ${offset} de ${tarSizeBytes} bytes.`);
     }
 
     return session.upload_id;
@@ -842,6 +842,6 @@ export class AnalyzeMediaTool {
       }
     }
 
-    throw new Error("Upload failed after retries.");
+    throw new Error("La subida falló tras los reintentos.");
   }
 }
