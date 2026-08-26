@@ -2,8 +2,9 @@
  * ANALYZE MEDIA TOOL
  *
  * Implements the `analyze_media` MCP tool:
- * - Validates local file path
- * - Streams the file to EnriProxy via resumable uploads
+ * - Validates local file paths or http(s) URLs
+ * - Materializes URL inputs via bounded downloads (temporary, owned cleanup)
+ * - Streams the bytes to EnriProxy via resumable uploads
  * - Triggers server-side analysis and returns text-only results
  *
  * @module tools/AnalyzeMediaTool
@@ -18,6 +19,7 @@ import { lookup as mimeLookup } from "mime-types";
 
 import { EnriProxyHttpError, type CreateUploadSessionResponse, type EnriProxyClient } from "../client/EnriProxyClient.js";
 import { assertHttpUrl, assertNonEmptyString, assertObject, optionalBoolean, optionalInt, optionalNumber, optionalString } from "../shared/validation.js";
+import { MediaUrlFetcher, type MediaUrlFetchResult } from "../shared/mediaUrlFetcher.js";
 import { computeTarSizeBytes, TarStream, type TarEntry } from "../shared/tar.js";
 
 /**
@@ -31,11 +33,28 @@ const ENRIVISION_MEDIA_SET_TAR_CONTENT_TYPE = "application/vnd.enrivision.media-
 const ENRIVISION_MEDIA_SET_TAR_MANIFEST_NAME = "manifest.json";
 
 /**
+ * One media input resolved to a local file ready for upload.
+ */
+interface ResolvedMediaInput {
+  /**
+   * Local filesystem path (already materialized for URL inputs).
+   */
+  readonly localPath: string;
+
+  /**
+   * Server-reported content type for downloaded URLs, preferred when the local
+   * extension lookup is inconclusive.
+   */
+  readonly urlContentType?: string;
+}
+
+/**
  * Tool parameters for `analyze_media`.
  */
 export interface AnalyzeMediaToolParams {
   /**
-   * Absolute local filesystem path on the MCP host.
+   * Absolute local filesystem path on the MCP host, or one http(s) URL to
+   * download (bounded, temporary) and analyze.
    *
    * @remarks
    * Use `paths` to analyze multiple images in a single call.
@@ -43,7 +62,7 @@ export interface AnalyzeMediaToolParams {
   readonly path?: string;
 
   /**
-   * Absolute local filesystem paths on the MCP host.
+   * Absolute local filesystem paths or http(s) URLs on the MCP host.
    *
    * @remarks
    * When provided, EnriVision uploads the files as a single media-set archive
@@ -250,7 +269,7 @@ export interface AnalyzeMediaToolDeps {
 }
 
 /**
- * MCP tool that uploads and analyzes local media.
+ * MCP tool that uploads and analyzes local or http(s) URL media.
  */
 export class AnalyzeMediaTool {
   /**
@@ -259,12 +278,19 @@ export class AnalyzeMediaTool {
   private readonly deps: AnalyzeMediaToolDeps;
 
   /**
+   * Bounded http(s) media fetcher used when `path`/`paths` carry URLs.
+   */
+  private readonly urlFetcher: MediaUrlFetcher;
+
+  /**
    * Creates a new {@link AnalyzeMediaTool}.
    *
    * @param deps - Tool dependencies
+   * @param urlFetcher - Optional URL fetcher override for tests
    */
-  public constructor(deps: AnalyzeMediaToolDeps) {
+  public constructor(deps: AnalyzeMediaToolDeps, urlFetcher: MediaUrlFetcher = new MediaUrlFetcher()) {
     this.deps = deps;
+    this.urlFetcher = urlFetcher;
   }
 
   /**
@@ -278,8 +304,8 @@ export class AnalyzeMediaTool {
 
     const pathRaw = typeof obj["path"] === "string" ? obj["path"].trim() : "";
     const path = pathRaw ? pathRaw : undefined;
-    if (path && !isAbsolute(path)) {
-      throw new Error("path debe ser una ruta de archivo absoluta.");
+    if (path && !isAbsolute(path) && !MediaUrlFetcher.isHttpUrl(path)) {
+      throw new Error("path debe ser una ruta de archivo absoluta o una URL http(s).");
     }
 
     const pathsRaw = obj["paths"];
@@ -294,8 +320,8 @@ export class AnalyzeMediaTool {
           continue;
         }
         const p = item.trim();
-        if (!isAbsolute(p)) {
-          throw new Error("paths debe contener sólo rutas de archivo absolutas.");
+        if (!isAbsolute(p) && !MediaUrlFetcher.isHttpUrl(p)) {
+          throw new Error("paths debe contener sólo rutas de archivo absolutas o URLs http(s).");
         }
         out.push(p);
       }
@@ -403,80 +429,122 @@ export class AnalyzeMediaTool {
 
     const client = this.deps.createClient(serverUrl, apiKey, timeoutMs);
 
-    const resolvedPaths =
+    const requestedPaths =
       Array.isArray(params.paths) && params.paths.length > 0
         ? [...params.paths]
         : typeof params.path === "string" && params.path.trim()
           ? [params.path.trim()]
           : [];
 
-    if (resolvedPaths.length === 0) {
+    if (requestedPaths.length === 0) {
       throw new Error("Proporcione 'path' o 'paths'.");
     }
 
-    let uploadId: string;
+    const materialized: MediaUrlFetchResult[] = [];
 
-    if (resolvedPaths.length > 1) {
-      uploadId = await this.uploadImageSetAsMediaSetTar(
-        client,
-        resolvedPaths,
-        timeoutMs,
-        clientTraceId
-      );
-    } else {
-      const singlePath = resolvedPaths[0]!;
-      const fileSize = await this.assertReadableFile(singlePath);
-      const filename = basename(singlePath);
-      const contentType = this.detectMimeType(singlePath);
-
-      const session = await client.createUploadSession({
-        filename,
-        sizeBytes: fileSize,
-        contentType,
-        clientTraceId
-      });
-
-      const finalOffset = await this.uploadFileResumable(client, singlePath, fileSize, session, timeoutMs);
-      if (finalOffset !== fileSize) {
-        throw new Error(`Subida incompleta: se enviaron ${finalOffset} de ${fileSize} bytes.`);
+    try {
+      const inputs: ResolvedMediaInput[] = [];
+      for (const requested of requestedPaths) {
+        if (!MediaUrlFetcher.isHttpUrl(requested)) {
+          inputs.push({ localPath: requested });
+          continue;
+        }
+        const fetched: MediaUrlFetchResult = await this.urlFetcher.fetch(requested);
+        materialized.push(fetched);
+        inputs.push({ localPath: fetched.localPath, urlContentType: fetched.contentType });
       }
 
-      uploadId = session.upload_id;
+      let uploadId: string;
+
+      if (inputs.length > 1) {
+        uploadId = await this.uploadImageSetAsMediaSetTar(
+          client,
+          inputs,
+          timeoutMs,
+          clientTraceId
+        );
+      } else {
+        const single = inputs[0]!;
+        const fileSize = await this.assertReadableFile(single.localPath);
+        const filename = basename(single.localPath);
+        const contentType = this.resolveEffectiveContentType(single.localPath, single.urlContentType);
+
+        const session = await client.createUploadSession({
+          filename,
+          sizeBytes: fileSize,
+          contentType,
+          clientTraceId
+        });
+
+        const finalOffset = await this.uploadFileResumable(client, single.localPath, fileSize, session, timeoutMs);
+        if (finalOffset !== fileSize) {
+          throw new Error(`Subida incompleta: se enviaron ${finalOffset} de ${fileSize} bytes.`);
+        }
+
+        uploadId = session.upload_id;
+      }
+
+      const defaultLanguageRaw =
+        typeof process.env["ENRIVISION_DEFAULT_LANGUAGE"] === "string"
+          ? process.env["ENRIVISION_DEFAULT_LANGUAGE"].trim()
+          : "";
+      const language =
+        typeof params.language === "string" && params.language.trim()
+          ? params.language.trim()
+          : defaultLanguageRaw
+            ? defaultLanguageRaw
+            : undefined;
+
+      const analysis = await client.analyze({
+        uploadId,
+        context: params.context,
+        question: params.question,
+        language,
+        maxFrames: params.maxFrames,
+        transcribe: params.transcribe,
+        transcriptionLanguage: params.transcriptionLanguage,
+        analysisMode: params.analysisMode,
+        video: params.video,
+        document: params.document,
+        audio: params.audio,
+        images: params.images
+      });
+
+      const extraction = this.stripInternalExtractionFields(analysis.extraction);
+
+      return {
+        analysis: analysis.analysis,
+        media_type: analysis.media_type,
+        extraction
+      };
+    } finally {
+      for (const fetched of materialized) {
+        await fetched.cleanup();
+      }
     }
+  }
 
-    const defaultLanguageRaw =
-      typeof process.env["ENRIVISION_DEFAULT_LANGUAGE"] === "string"
-        ? process.env["ENRIVISION_DEFAULT_LANGUAGE"].trim()
-        : "";
-    const language =
-      typeof params.language === "string" && params.language.trim()
-        ? params.language.trim()
-        : defaultLanguageRaw
-          ? defaultLanguageRaw
-          : undefined;
-
-    const analysis = await client.analyze({
-      uploadId,
-      context: params.context,
-      question: params.question,
-      language,
-      maxFrames: params.maxFrames,
-      transcribe: params.transcribe,
-      transcriptionLanguage: params.transcriptionLanguage,
-      analysisMode: params.analysisMode,
-      video: params.video,
-      document: params.document,
-      audio: params.audio,
-      images: params.images
-    });
-
-    const extraction = this.stripInternalExtractionFields(analysis.extraction);
-
-    return {
-      analysis: analysis.analysis,
-      media_type: analysis.media_type,
-      extraction
-    };
+  /**
+   * Resolves the upload content type for one media input.
+   *
+   * @remarks
+   * URL downloads keep their extension-derived type when the extension is
+   * recognized; otherwise the server-reported content type wins over the
+   * generic `application/octet-stream` fallback.
+   *
+   * @param localPath - Local file path (already materialized for URLs)
+   * @param urlContentType - Server-reported content type for downloaded URLs
+   * @returns Effective MIME type
+   */
+  private resolveEffectiveContentType(localPath: string, urlContentType?: string): string {
+    const detected = this.detectMimeType(localPath);
+    if (detected !== "application/octet-stream") {
+      return detected;
+    }
+    if (urlContentType && urlContentType.trim() && urlContentType !== "application/octet-stream") {
+      return urlContentType.trim();
+    }
+    return detected;
   }
 
   /**
@@ -594,18 +662,18 @@ export class AnalyzeMediaTool {
    * screenshot sets.
    *
    * @param client - EnriProxy client
-   * @param filePaths - Absolute image file paths
+   * @param inputs - Resolved media inputs (local paths, URLs already materialized)
    * @param timeoutMs - Request timeout per HTTP request
    * @param clientTraceId - Client trace id for correlation
    * @returns Upload id for the created tar session
    */
   private async uploadImageSetAsMediaSetTar(
     client: EnriProxyClient,
-    filePaths: ReadonlyArray<string>,
+    inputs: ReadonlyArray<ResolvedMediaInput>,
     timeoutMs: number,
     clientTraceId: string
   ): Promise<string> {
-    if (filePaths.length < 2) {
+    if (inputs.length < 2) {
       throw new Error("uploadImageSetAsMediaSetTar requires at least 2 file paths.");
     }
 
@@ -618,14 +686,14 @@ export class AnalyzeMediaTool {
       entryName: string;
     }> = [];
 
-    for (let i = 0; i < filePaths.length; i += 1) {
-      const p = filePaths[i]!;
-      const sizeBytes = await this.assertReadableFile(p);
-      const filename = basename(p);
-      const contentType = this.detectMimeType(p);
+    for (let i = 0; i < inputs.length; i += 1) {
+      const input = inputs[i]!;
+      const sizeBytes = await this.assertReadableFile(input.localPath);
+      const filename = basename(input.localPath);
+      const contentType = this.resolveEffectiveContentType(input.localPath, input.urlContentType);
 
       if (!contentType.toLowerCase().startsWith("image/")) {
-        throw new Error(`paths debe contener sólo archivos de imagen. No es imagen: ${p} (${contentType})`);
+        throw new Error(`paths debe contener sólo archivos de imagen. No es imagen: ${input.localPath} (${contentType})`);
       }
 
       const extRaw = extname(filename).toLowerCase();
@@ -634,7 +702,7 @@ export class AnalyzeMediaTool {
 
       files.push({
         index: i + 1,
-        path: p,
+        path: input.localPath,
         filename,
         sizeBytes,
         contentType,

@@ -1,10 +1,11 @@
 # EnriVision Status
 
-Last Updated: 2026-08-24
+Last Updated: 2026-08-26
 
 ## Current State
-- EnriVision is a client-side MCP server (npm: `@bedolla/enrivision`) exposing a single tool: `analyze_media`; the package is prepared as version `0.1.1`.
-- `analyze_media` uploads local file bytes to EnriProxy via resumable uploads (`/v1/uploads`) and triggers server-side analysis (`/v1/vision/analyze`).
+- EnriVision is a client-side MCP server (npm: `@bedolla/enrivision`) exposing a single tool: `analyze_media`; the package is prepared as version `0.1.2`.
+- `analyze_media` uploads local file bytes (or materialized URL downloads) to EnriProxy via resumable uploads (`/v1/uploads`) and triggers server-side analysis (`/v1/vision/analyze`).
+- `analyze_media` accepts absolute local paths or http(s) URLs in both `path` and `paths`; URLs are downloaded temporarily on the MCP host (64 MiB cap, 60 s timeout, SSRF-guarded: private/loopback/link-local destinations blocked at literal-IP and DNS level with per-hop redirect re-validation) and always cleaned up after analysis.
 - Every model-facing string (tool description, parameter descriptions, errors, output envelope) is Spanish per the monorepo convention, and the description embeds UI-screenshot debugging guidance (verdict-first, zone-by-zone, hex colors, quantified layout defects, observed-vs-expected) mirroring EnriProxy's vision system prompt; wire field names are unchanged.
 - Supports both single-file analysis (`path`) and multi-image analysis (`paths[]`). When `paths[]` is used, EnriVision uploads a single tar archive (`application/vnd.enrivision.media-set+tar`) to avoid per-key concurrent upload-session limits.
 - Supports multipass tuning via tool parameters (`analysis_mode`, `video`, `document`, `images`) while keeping client-side work limited to streaming bytes (no local ffmpeg/Whisper).
@@ -22,5 +23,5 @@ Last Updated: 2026-08-24
 - MCP tool schema no longer exposes per-call `server_url`, `api_key`, or `timeout_ms` overrides.
 
 ## Testing
-- Ran: `npm test` (OK) - 3 files, 8 tests.
+- Ran: `npm test` (OK) - 4 files, 20 tests.
 - Ran: `npm run build` (OK).

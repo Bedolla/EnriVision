@@ -148,7 +148,7 @@ export class EnriVisionServer {
         "\n" +
         "Reglas:\n" +
         "- Use `path` para un archivo, o `paths` para varias imágenes (capturas de UI/sets de fotos).\n" +
-        "- `path`/`paths` son rutas absolutas en la máquina donde corre este servidor MCP (el cliente).\n" +
+        "- `path`/`paths` aceptan rutas absolutas en la máquina donde corre este servidor MCP (el cliente), o URLs http(s) que se descargan temporalmente en esa misma máquina (hasta 64 MiB; no se permiten hosts locales ni redes privadas).\n" +
         "- Requiere una API key válida de EnriProxy (env `ENRIPROXY_API_KEY`, enviada como Authorization: Bearer ...).\n" +
         "- Prefiera el Read nativo del cliente sólo para texto/PDF/imágenes comunes pequeños y simples cuando funcione; prefiera esta herramienta para PDFs grandes.\n" +
         "- Responda estrictamente con la salida de la herramienta; si faltan fotogramas/transcripción, dígalo.\n" +
@@ -169,12 +169,12 @@ export class EnriVisionServer {
           path: {
             type: "string",
             description:
-              "Ruta absoluta a un archivo local en la máquina donde corre el servidor MCP (por ejemplo, C:\\\\Users\\\\User\\\\Downloads\\\\video.mp4)."
+              "Ruta absoluta a un archivo local en la máquina donde corre el servidor MCP (por ejemplo, C:\\\\Users\\\\User\\\\Downloads\\\\video.mp4), o una URL http(s) de imagen/video/audio/PDF para descargar y analizar (hasta 64 MiB; hosts locales y redes privadas bloqueados)."
           },
           paths: {
             type: "array",
             description:
-              "Rutas absolutas a varios archivos de imagen locales (capturas de UI/sets de fotos). Cuando se proporcionan, EnriVision sube un único archivo de conjunto para procesamiento por lotes y reducción del lado servidor.",
+              "Rutas absolutas a varios archivos de imagen locales o URLs http(s) (capturas de UI/sets de fotos; cada URL hasta 64 MiB). Cuando se proporcionan, EnriVision sube un único archivo de conjunto para procesamiento por lotes y reducción del lado servidor.",
             items: {
               type: "string"
             }

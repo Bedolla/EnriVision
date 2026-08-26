@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { AnalyzeMediaTool } from "../src/tools/AnalyzeMediaTool.js";
+import type { MediaUrlFetchResult, MediaUrlFetcher } from "../src/shared/mediaUrlFetcher.js";
 
 describe("AnalyzeMediaTool.parseParams", () => {
   it("rejects non-absolute paths", () => {
@@ -75,6 +79,25 @@ describe("AnalyzeMediaTool.parseParams", () => {
     expect(params.audio?.timestamps).toBe(true);
     expect(params.audio?.segmentSeconds).toBe(15);
     expect(params.audio?.maxSegments).toBe(10);
+  });
+
+  it("accepts non-absolute paths when they are http(s) URLs", () => {
+    const tool = new AnalyzeMediaTool({
+      createClient: () => {
+        throw new Error("not used");
+      },
+      defaultServerUrl: "http://127.0.0.1:8787",
+      defaultApiKey: "test",
+      defaultTimeoutMs: 1000
+    });
+
+    const params = tool.parseParams({ path: "https://example.test/pic.png" });
+    expect(params.path).toBe("https://example.test/pic.png");
+
+    const multi = tool.parseParams({
+      paths: ["https://example.test/a.png", "C:\\Users\\User\\Downloads\\b.png"]
+    });
+    expect(multi.paths).toEqual(["https://example.test/a.png", "C:\\Users\\User\\Downloads\\b.png"]);
   });
 
   it("rejects invalid analysis_mode values", () => {
@@ -172,5 +195,107 @@ describe("AnalyzeMediaTool output sanitization", () => {
     const nested = (sanitized as Record<string, unknown>)["nested"];
     expect(nested).toBeTypeOf("object");
     expect(nested as Record<string, unknown>).not.toHaveProperty("model");
+  });
+});
+
+describe("AnalyzeMediaTool URL execution", () => {
+  /**
+   * Creates stub EnriProxy client deps recording upload session inputs.
+   *
+   * @param sessions - Mutable array receiving every created upload session.
+   * @returns Deps bundle with a stub client factory.
+   */
+  function createStubDeps(
+    sessions: Array<{ filename: string; contentType: string; sizeBytes: number }>
+  ): {
+    createClient: () => unknown;
+    defaultServerUrl: string;
+    defaultApiKey: string;
+    defaultTimeoutMs: number;
+  } {
+    return {
+      createClient: () =>
+        ({
+          createUploadSession: async (request: { filename: string; contentType: string; sizeBytes: number }) => {
+            sessions.push({ filename: request.filename, contentType: request.contentType, sizeBytes: request.sizeBytes });
+            return { upload_id: "upload_1", chunk_size_bytes: 1024 * 1024, expires_at: Date.now() + 60_000 };
+          },
+          getUploadOffset: async () => 0,
+          appendUploadChunk: async (request: { offset: number; chunk: Buffer }) => request.offset + request.chunk.length,
+          analyze: async () => ({ analysis: "ok", media_type: "image", extraction: { upload_id: "upload_1" } })
+        }) as unknown as never,
+      defaultServerUrl: "http://127.0.0.1:8787",
+      defaultApiKey: "test",
+      defaultTimeoutMs: 1000
+    };
+  }
+
+  it("materializes a URL path, prefers the server content type for unknown extensions, and cleans up", async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "enrivision-tool-"));
+    const sessions: Array<{ filename: string; contentType: string; sizeBytes: number }> = [];
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    try {
+      const downloadedPath = join(temporaryDirectory, "remote-media.bin");
+      await writeFile(downloadedPath, bytes);
+      const cleanup = vi.fn();
+
+      const stubFetcher = {
+        fetch: vi.fn(async (): Promise<MediaUrlFetchResult> => ({
+          localPath: downloadedPath,
+          contentType: "image/webp",
+          cleanup
+        }))
+      } as unknown as MediaUrlFetcher;
+
+      const tool = new AnalyzeMediaTool(createStubDeps(sessions) as never, stubFetcher);
+      const result = await tool.execute({ path: "https://example.test/media/remote-media" });
+
+      expect(result.analysis).toBe("ok");
+      expect(result.media_type).toBe("image");
+      expect(result.extraction).not.toHaveProperty("upload_id");
+      expect(stubFetcher.fetch).toHaveBeenCalledWith("https://example.test/media/remote-media");
+      expect(sessions.length).toBe(1);
+      expect(sessions[0]?.filename).toBe("remote-media.bin");
+      expect(sessions[0]?.contentType).toBe("image/webp");
+      expect(sessions[0]?.sizeBytes).toBe(bytes.byteLength);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("materializes multiple URL paths and cleans up every download", async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "enrivision-tool-"));
+    const sessions: Array<{ filename: string; contentType: string; sizeBytes: number }> = [];
+    try {
+      const cleanups = [vi.fn(), vi.fn()];
+      const downloadedPaths = [join(temporaryDirectory, "1.png"), join(temporaryDirectory, "2.png")];
+      await writeFile(downloadedPaths[0]!, new Uint8Array([1]));
+      await writeFile(downloadedPaths[1]!, new Uint8Array([2]));
+
+      let callIndex = 0;
+      const stubFetcher = {
+        fetch: vi.fn(async (): Promise<MediaUrlFetchResult> => {
+          const index = callIndex;
+          callIndex += 1;
+          return { localPath: downloadedPaths[index]!, contentType: "image/png", cleanup: cleanups[index]! };
+        })
+      } as unknown as MediaUrlFetcher;
+
+      const tool = new AnalyzeMediaTool(createStubDeps(sessions) as never, stubFetcher);
+      const result = await tool.execute({
+        paths: ["https://example.test/a.png", "https://example.test/b.png"],
+        images: { imagesPerBatch: 2 }
+      });
+
+      expect(result.media_type).toBe("image");
+      expect(sessions.length).toBe(1);
+      expect(sessions[0]?.filename).toBe("enrivision-image-set.tar");
+      expect(sessions[0]?.contentType).toBe("application/vnd.enrivision.media-set+tar");
+      expect(cleanups[0]).toHaveBeenCalledTimes(1);
+      expect(cleanups[1]).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
   });
 });

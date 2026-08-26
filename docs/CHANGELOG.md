@@ -2,6 +2,13 @@
 
 All notable changes to EnriVision are documented in this file.
 
+## 2026-08-26
+### Added
+- `analyze_media` now accepts http(s) URLs in both `path` and `paths`, mirroring the URL support added to EnriCode's `vision.analyze_media`. URL inputs are materialized before upload via the new `MediaUrlFetcher` (`src/shared/mediaUrlFetcher.ts`): bounded download (64 MiB cap enforced on `content-length` and on the received body, 60 s timeout), SSRF guard (literal loopback/private/link-local IPv4/IPv6 addresses rejected without DNS, hostnames DNS-resolved and rejected when any resolved address is private, redirects followed manually up to 3 hops with per-hop re-validation), and a temporary directory under `os.tmpdir()` with an owned cleanup that always runs in `execute`'s `finally`. Downloaded files keep their URL-derived filename and, when the local extension is unrecognized (`application/octet-stream`), the server-reported content type is preferred for the upload session (single files and per-entry manifest types in media-set tars). MCP schema descriptions, tool rules, and README now document URL acceptance and its bounds.
+### Testing
+- Ran: `npm test` (OK) - 4 files, 20 tests (new `tests/mediaUrlFetcher.test.ts` with 9 cases: URL detection, happy-path download with cleanup, non-http rejection, literal private-destination rejection, DNS-resolved private rejection, redirect following, private-redirect rejection, size-limit rejection, non-2xx rejection; plus parse/execute URL cases in `tests/AnalyzeMediaTool.test.ts` covering single-URL materialization with content-type preference and multi-URL tar materialization with per-download cleanup).
+- Ran: `npm run typecheck` and `npm run build` (OK).
+
 ## 2026-08-24
 ### Changed
 - Every model-facing string is now Spanish, matching the monorepo convention: the full `analyze_media` description (usage rules, when-to-use list) and every parameter description across the schema (`path`, `paths`, `context`, `question`, `language`, `max_frames`, `transcribe`, `transcription_language`, `analysis_mode`, and the `video`/`document`/`audio`/`images` tuning objects), plus tool validation errors, upload/analysis errors, the unknown-tool server message, and the output envelope (`ANÁLISIS (tipo):`). Wire field names and the EnriProxy contract are unchanged.

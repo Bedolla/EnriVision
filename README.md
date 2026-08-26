@@ -121,15 +121,15 @@ General notes:
 
 - The tool accepts a single JSON object as its input (the MCP `arguments`).
 - Exactly one of `path` or `paths` is required.
-- Paths must be absolute on the machine running the MCP server.
+- Paths must be absolute on the machine running the MCP server, or http(s) URLs. URLs are downloaded to a temporary directory on the MCP host (up to 64 MiB each; localhost and private-network destinations are blocked) and deleted after analysis.
 - EnriVision does not accept per-call `server_url`/`api_key` overrides (these are configured via env vars).
 
 ### `analyze_media`
 
 Inputs:
 
-- `path` (`string`, optional): absolute local file path.
-- `paths` (`string[]`, optional): absolute local image paths (useful for UI screenshot sets).
+- `path` (`string`, optional): absolute local file path, or one http(s) URL to download and analyze (up to 64 MiB).
+- `paths` (`string[]`, optional): absolute local image paths or http(s) image URLs (useful for UI screenshot sets).
 - `context` (`string`, optional): high-level hint (examples: `ui`, `diagram`, `chart`, `error`, `code`, `meeting`, `tutorial`, `photo`).
 - `question` (`string`, optional): what you want to extract/answer.
 - `language` (`string`, optional): preferred response language (ISO 639-1; e.g., `es`, `en`). If omitted, uses `ENRIVISION_DEFAULT_LANGUAGE` when set.
