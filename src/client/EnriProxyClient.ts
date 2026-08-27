@@ -64,6 +64,14 @@ export interface AnalyzeVisionResponse {
   readonly analysis: string;
 
   /**
+   * Grounded element boxes for image analyses (original-relative [0,1]).
+   */
+  readonly elements?: ReadonlyArray<{
+    readonly label: string;
+    readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+  }>;
+
+  /**
    * Detected media type.
    */
   readonly media_type: string;
@@ -352,6 +360,16 @@ export class EnriProxyClient {
     readonly analysisMode?: "auto" | "single" | "multipass";
 
     /**
+     * Optional relative image region for native-resolution zoom (images only).
+     */
+    readonly region?: {
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    };
+
+    /**
      * Optional video multipass tuning.
      */
     readonly video?: {
@@ -462,6 +480,21 @@ export class EnriProxyClient {
 
     if (typeof params.analysisMode === "string" && params.analysisMode.trim()) {
       payload["analysis_mode"] = params.analysisMode.trim();
+    }
+    if (
+      typeof params.region === "object" &&
+      params.region !== null &&
+      Number.isFinite(params.region.x) &&
+      Number.isFinite(params.region.y) &&
+      Number.isFinite(params.region.width) &&
+      Number.isFinite(params.region.height)
+    ) {
+      payload["region"] = {
+        x: params.region.x,
+        y: params.region.y,
+        width: params.region.width,
+        height: params.region.height
+      };
     }
 
     if (params.video && typeof params.video === "object") {

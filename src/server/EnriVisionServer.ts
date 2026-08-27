@@ -111,7 +111,16 @@ export class EnriVisionServer {
           content: [
             {
               type: "text",
-              text: `ANÁLISIS (${result.media_type}):\n${result.analysis}`
+              text:
+                `ANALISIS (${result.media_type}):\n${result.analysis}` +
+                (Array.isArray(result.elements) && result.elements.length > 0
+                  ? `\n\nelements (cajas relativas a la imagen original, reutilizables como 'region' para zoom):\n${result.elements
+                      .map(
+                        (element) =>
+                          `- ${element.label} [${element.box.x}, ${element.box.y}, ${element.box.width}, ${element.box.height}]`
+                      )
+                      .join("\n")}`
+                  : "")
             }
           ],
           structuredContent: result
@@ -210,6 +219,30 @@ export class EnriVisionServer {
             type: "string",
             enum: ["auto", "single", "multipass"],
             description: "Selector opcional de modo de análisis: auto, single o multipass."
+          },
+          region: {
+            type: "object",
+            description:
+              "Región relativa de la IMAGEN original para analizar a resolución nativa (zoom). Coordenadas entre 0 y 1; (0,0) es la esquina superior izquierda. Use las cajas devueltas en 'elements' de un análisis previo de la misma imagen: NUNCA invente coordenadas. Ideal para leer texto pequeño (labels, código) que en la imagen completa comprimida resulta ilegible. Sólo imágenes (path, no paths).",
+            properties: {
+              x: {
+                type: "number",
+                description: "Coordenada horizontal relativa de la esquina superior izquierda (0 = borde izquierdo)."
+              },
+              y: {
+                type: "number",
+                description: "Coordenada vertical relativa de la esquina superior izquierda (0 = borde superior)."
+              },
+              width: {
+                type: "number",
+                description: "Ancho relativo (1 = ancho completo)."
+              },
+              height: {
+                type: "number",
+                description: "Alto relativo (1 = alto completo)."
+              }
+            },
+            required: ["x", "y", "width", "height"]
           },
           video: {
             type: "object",

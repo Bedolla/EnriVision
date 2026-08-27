@@ -144,6 +144,95 @@ describe("AnalyzeMediaTool.parseParams", () => {
     expect(params.images?.imagesPerBatch).toBe(6);
     expect(params.images?.maxDimension).toBe(2048);
   });
+
+  it("parses and validates relative image regions with echo coaching", () => {
+    const tool = new AnalyzeMediaTool({
+      createClient: () => {
+        throw new Error("not used");
+      },
+      defaultServerUrl: "http://127.0.0.1:8787",
+      defaultApiKey: "test",
+      defaultTimeoutMs: 1000
+    });
+
+    const params = tool.parseParams({
+      path: "C:\\Users\\User\\Downloads\\shot.png",
+      question: "¿qué dice el botón?",
+      region: { x: 0.25, y: 0.5, width: 0.5, height: 0.25 }
+    });
+
+    expect(params.region).toEqual({ x: 0.25, y: 0.5, width: 0.5, height: 0.25 });
+
+    expect(() =>
+      tool.parseParams({
+        path: "C:\\Users\\User\\Downloads\\shot.png",
+        question: "q",
+        region: { x: 1.5, y: 0, width: 0.5, height: 0.5 }
+      })
+    ).toThrow(/region\.x.*elements/u);
+
+    expect(() =>
+      tool.parseParams({
+        path: "C:\\Users\\User\\Downloads\\shot.png",
+        question: "q",
+        region: { x: 0, y: 0, width: 0, height: 0.5 }
+      })
+    ).toThrow(/mayores que 0/u);
+
+    const plain = tool.parseParams({ path: "C:\\Users\\User\\Downloads\\shot.png", question: "q" });
+    expect(plain.region).toBeUndefined();
+  });
+
+  it("forwards region to the analyze call and returns elements", async () => {
+    const analyzeCalls: Array<Record<string, unknown>> = [];
+    const tool = new AnalyzeMediaTool({
+      createClient: () =>
+        ({
+          createUploadSession: async () => ({
+            upload_id: "upload_1",
+            chunk_size_bytes: 1024 * 1024,
+            expires_at: Date.now() + 60_000
+          }),
+          getUploadOffset: async () => 0,
+          appendUploadChunk: async (request: { offset: number; chunk: Buffer }) =>
+            request.offset + request.chunk.length,
+          analyze: async (request: Record<string, unknown>) => {
+            analyzeCalls.push(request);
+            return {
+              analysis: "El botón dice 'Guardar cambios'.",
+              elements: [
+                { label: "botón Guardar cambios", box: { x: 0.5, y: 0.5, width: 0.25, height: 0.1 } }
+              ],
+              media_type: "image",
+              extraction: { upload_id: "upload_1" }
+            };
+          }
+        }) as never,
+      defaultServerUrl: "http://127.0.0.1:8787",
+      defaultApiKey: "test",
+      defaultTimeoutMs: 1000
+    });
+
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "enrivision-region-"));
+    try {
+      const imagePath = join(temporaryDirectory, "shot.png");
+      await writeFile(imagePath, new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]));
+
+      const result = await tool.execute({
+        path: imagePath,
+        question: "¿qué dice el botón?",
+        region: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 }
+      });
+
+      expect(result.analysis).toBe("El botón dice 'Guardar cambios'.");
+      expect(result.elements?.[0]?.label).toBe("botón Guardar cambios");
+      expect(result.elements?.[0]?.box).toEqual({ x: 0.5, y: 0.5, width: 0.25, height: 0.1 });
+      expect(analyzeCalls[0]?.["region"]).toEqual({ x: 0.4, y: 0.4, width: 0.2, height: 0.2 });
+      expect(result.extraction).not.toHaveProperty("upload_id");
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("AnalyzeMediaTool output sanitization", () => {

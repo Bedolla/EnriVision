@@ -3,7 +3,8 @@
 Last Updated: 2026-08-26
 
 ## Current State
-- EnriVision is a client-side MCP server (npm: `@bedolla/enrivision`) exposing a single tool: `analyze_media`; the package is prepared as version `0.1.2`.
+- EnriVision is a client-side MCP server (npm: `@bedolla/enrivision`) exposing a single tool: `analyze_media`; the package is prepared as version `0.1.3`.
+- `analyze_media` accepts `region` (relative [0,1], single images) for native-resolution zoom and returns `elements` grounding boxes in both structured and text output — boxes echo back as `region` (cursor-style contract: never invent coordinates).
 - `analyze_media` uploads local file bytes (or materialized URL downloads) to EnriProxy via resumable uploads (`/v1/uploads`) and triggers server-side analysis (`/v1/vision/analyze`).
 - `analyze_media` accepts absolute local paths or http(s) URLs in both `path` and `paths`; URLs are downloaded temporarily on the MCP host (64 MiB cap, 60 s timeout, SSRF-guarded: private/loopback/link-local destinations blocked at literal-IP and DNS level with per-hop redirect re-validation) and always cleaned up after analysis.
 - Every model-facing string (tool description, parameter descriptions, errors, output envelope) is Spanish per the monorepo convention, and the description embeds UI-screenshot debugging guidance (verdict-first, zone-by-zone, hex colors, quantified layout defects, observed-vs-expected) mirroring EnriProxy's vision system prompt; wire field names are unchanged.

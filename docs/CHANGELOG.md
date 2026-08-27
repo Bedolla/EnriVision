@@ -2,6 +2,12 @@
 
 All notable changes to EnriVision are documented in this file.
 
+## 2026-08-26 (region + elements)
+### Added
+- `analyze_media` accepts `region: {x, y, width, height}` for single-image (`path`) native-resolution zoom: validated relative [0,1] with echo coaching (never invent coordinates; use boxes from a previous `elements` result), forwarded to EnriProxy's crop pipeline. Image analyses now surface `elements` (grounded boxes, original-relative) both in `structuredContent` and as a compact `elements (cajas relativas...)` appendix in the text output so any client can reuse them as `region` without parsing JSON. Schema documents the contract in Spanish.
+### Testing
+- Ran: `npm test` (OK) - 22 tests (new: region parse/validation with coaching, execute forwards region and returns elements passthrough). `npm run typecheck` (OK).
+
 ## 2026-08-26
 ### Added
 - `analyze_media` now accepts http(s) URLs in both `path` and `paths`, mirroring the URL support added to EnriCode's `vision.analyze_media`. URL inputs are materialized before upload via the new `MediaUrlFetcher` (`src/shared/mediaUrlFetcher.ts`): bounded download (64 MiB cap enforced on `content-length` and on the received body, 60 s timeout), SSRF guard (literal loopback/private/link-local IPv4/IPv6 addresses rejected without DNS, hostnames DNS-resolved and rejected when any resolved address is private, redirects followed manually up to 3 hops with per-hop re-validation), and a temporary directory under `os.tmpdir()` with an owned cleanup that always runs in `execute`'s `finally`. Downloaded files keep their URL-derived filename and, when the local extension is unrecognized (`application/octet-stream`), the server-reported content type is preferred for the upload session (single files and per-entry manifest types in media-set tars). MCP schema descriptions, tool rules, and README now document URL acceptance and its bounds.

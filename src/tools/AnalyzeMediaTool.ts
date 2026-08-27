@@ -211,6 +211,41 @@ export interface AnalyzeMediaToolParams {
      */
     readonly maxDimension?: number;
   };
+
+  /**
+   * Optional relative region of the analyzed image for native-resolution zoom.
+   *
+   * @remarks
+   * Normalized [0,1] coordinates over the original image (0,0 = top-left
+   * corner). Use the boxes returned in `elements` of a previous analysis of
+   * the same image; never invent coordinates.
+   */
+  readonly region?: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+}
+
+/**
+ * One grounded element box returned by an image analysis.
+ */
+export interface AnalyzeMediaElementBox {
+  /**
+   * Short label naming the grounded element.
+   */
+  readonly label: string;
+
+  /**
+   * Original-relative [0,1] box that can be echoed back as `region`.
+   */
+  readonly box: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
 }
 
 /**
@@ -221,6 +256,11 @@ export interface AnalyzeMediaToolResult extends Record<string, unknown> {
    * Text analysis produced by EnriProxy.
    */
   readonly analysis: string;
+
+  /**
+   * Grounded element boxes for image analyses (original-relative [0,1]).
+   */
+  readonly elements?: ReadonlyArray<AnalyzeMediaElementBox>;
 
   /**
    * Detected media type.
@@ -407,6 +447,7 @@ export class AnalyzeMediaTool {
       transcribe,
       transcriptionLanguage,
       analysisMode,
+      region: this.parseRegion(obj["region"]),
       video,
       document,
       audio,
@@ -504,6 +545,7 @@ export class AnalyzeMediaTool {
         transcribe: params.transcribe,
         transcriptionLanguage: params.transcriptionLanguage,
         analysisMode: params.analysisMode,
+        region: params.region,
         video: params.video,
         document: params.document,
         audio: params.audio,
@@ -514,6 +556,9 @@ export class AnalyzeMediaTool {
 
       return {
         analysis: analysis.analysis,
+        ...(Array.isArray(analysis.elements) && analysis.elements.length > 0
+          ? { elements: Object.freeze(analysis.elements.map((element) => Object.freeze({ ...element }))) }
+          : {}),
         media_type: analysis.media_type,
         extraction
       };
@@ -612,6 +657,50 @@ export class AnalyzeMediaTool {
       return value as Record<string, unknown>;
     }
     return {};
+  }
+
+  /**
+   * Validates that a path exists and is a readable file.
+   *
+   * @param filePath - Local filesystem path
+  /**
+   * Parses and validates the optional relative image region.
+   *
+   * @param raw - Raw `region` argument.
+   * @returns Validated region, or undefined when absent.
+   */
+  private parseRegion(
+    raw: unknown
+  ): { x: number; y: number; width: number; height: number } | undefined {
+    if (raw === undefined || raw === null) {
+      return undefined;
+    }
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error(
+        "region debe ser un objeto {x, y, width, height} con coordenadas relativas entre 0 y 1. Nunca invente coordenadas: use las cajas devueltas en 'elements' de un análisis previo de la misma imagen."
+      );
+    }
+    const record = raw as Record<string, unknown>;
+    const readFraction = (fieldName: string): number => {
+      const value: unknown = record[fieldName];
+      const parsed: number = typeof value === "number" ? value : Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+        throw new Error(
+          `region.${fieldName} debe ser un número entre 0 y 1 (coordenadas relativas a la imagen original). Use las cajas de 'elements' de un análisis previo.`
+        );
+      }
+      return parsed;
+    };
+    const region = {
+      x: readFraction("x"),
+      y: readFraction("y"),
+      width: readFraction("width"),
+      height: readFraction("height")
+    };
+    if (region.width <= 0 || region.height <= 0) {
+      throw new Error("region.width y region.height deben ser mayores que 0.");
+    }
+    return region;
   }
 
   /**
