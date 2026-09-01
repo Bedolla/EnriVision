@@ -24,5 +24,5 @@ Last Updated: 2026-08-26
 - MCP tool schema no longer exposes per-call `server_url`, `api_key`, or `timeout_ms` overrides.
 
 ## Testing
-- Ran: `npm test` (OK) - 4 files, 20 tests.
+- Ran: `npm test` (OK) - 4 files, 22 tests.
 - Ran: `npm run build` (OK).

@@ -2,6 +2,10 @@
 
 All notable changes to EnriVision are documented in this file.
 
+## 2026-08-31 (normalized-coordinate coaching in elements)
+
+- The `analyze_media` text output now explains the `elements` boxes explicitly for small models: coordinates are normalized 0-1 relative to the original image (not pixels), (0,0) is the top-left corner, the boxes are reusable directly as the `region` zoom selector, and coordinates must never be invented. Tool descriptions and analysis flow are unchanged; suite 22/22, tsc and build clean.
+
 ## 2026-08-26 (region + elements)
 ### Added
 - `analyze_media` accepts `region: {x, y, width, height}` for single-image (`path`) native-resolution zoom: validated relative [0,1] with echo coaching (never invent coordinates; use boxes from a previous `elements` result), forwarded to EnriProxy's crop pipeline. Image analyses now surface `elements` (grounded boxes, original-relative) both in `structuredContent` and as a compact `elements (cajas relativas...)` appendix in the text output so any client can reuse them as `region` without parsing JSON. Schema documents the contract in Spanish.

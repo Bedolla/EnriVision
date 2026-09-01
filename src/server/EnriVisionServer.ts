@@ -114,7 +114,7 @@ export class EnriVisionServer {
               text:
                 `ANALISIS (${result.media_type}):\n${result.analysis}` +
                 (Array.isArray(result.elements) && result.elements.length > 0
-                  ? `\n\nelements (cajas relativas a la imagen original, reutilizables como 'region' para zoom):\n${result.elements
+                  ? `\n\nelements (cajas relativas a la imagen original, coordenadas normalizadas 0-1 —no píxeles—; (0,0) es la esquina superior izquierda; reutilizables directamente como 'region' para zoom; NUNCA invente coordenadas):\n${result.elements
                       .map(
                         (element) =>
                           `- ${element.label} [${element.box.x}, ${element.box.y}, ${element.box.width}, ${element.box.height}]`
