@@ -148,6 +148,95 @@ describe("EnriProxyClient request payloads", () => {
     });
   });
 
+  it("rejects invalid clip windows in Spanish instead of coercing them", async () => {
+    const started = await startServer(async (_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ analysis: "ok", media_type: "video", extraction: {} }));
+    });
+    server = started.server;
+
+    const client = new EnriProxyClient({
+      baseUrl: started.baseUrl,
+      apiKey: "test-key",
+      timeoutMs: 1000
+    });
+
+    await expect(
+      client.analyze({ uploadId: "upload-123", video: { clipStartSeconds: -5 } })
+    ).rejects.toThrow("video.clip_start_seconds debe ser un número entre 0 y 86400 (segundos).");
+    await expect(
+      client.analyze({ uploadId: "upload-123", video: { clipDurationSeconds: 0 } })
+    ).rejects.toThrow("video.clip_duration_seconds debe ser un número mayor que 0");
+    await expect(
+      client.analyze({ uploadId: "upload-123", video: { clipDurationSeconds: -3 } })
+    ).rejects.toThrow("video.clip_duration_seconds debe ser un número mayor que 0");
+    await expect(
+      client.analyze({ uploadId: "upload-123", video: { clipStartSeconds: Number.NaN } })
+    ).rejects.toThrow("video.clip_start_seconds debe ser un número entre 0 y 86400 (segundos).");
+  });
+
+  it("forwards parser-derived end-minus-start windows verbatim", async () => {
+    let recorded: RecordedRequest | null = null;
+    const started = await startServer(async (req, res) => {
+      const body = await readJsonBody(req);
+      recorded = {
+        url: req.url ?? "",
+        method: req.method ?? "",
+        headers: req.headers,
+        body
+      };
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ analysis: "ok", media_type: "video", extraction: {} }));
+    });
+    server = started.server;
+
+    const client = new EnriProxyClient({
+      baseUrl: started.baseUrl,
+      apiKey: "test-key",
+      timeoutMs: 1000
+    });
+
+    // Parity with AnalyzeMediaParamParser: clip_start_seconds 12 + clip_end_seconds 34
+    // derives clipDurationSeconds 22, which the client must forward untouched.
+    await client.analyze({ uploadId: "upload-123", video: { clipStartSeconds: 12, clipDurationSeconds: 22 } });
+
+    const video = recorded?.body["video"] as Record<string, unknown> | undefined;
+    expect(video?.["clip_start_seconds"]).toBe(12);
+    expect(video?.["clip_duration_seconds"]).toBe(22);
+  });
+
+  it("omits the clip window when both bounds are undefined", async () => {
+    let recorded: RecordedRequest | null = null;
+    const started = await startServer(async (req, res) => {
+      const body = await readJsonBody(req);
+      recorded = {
+        url: req.url ?? "",
+        method: req.method ?? "",
+        headers: req.headers,
+        body
+      };
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ analysis: "ok", media_type: "video", extraction: {} }));
+    });
+    server = started.server;
+
+    const client = new EnriProxyClient({
+      baseUrl: started.baseUrl,
+      apiKey: "test-key",
+      timeoutMs: 1000
+    });
+
+    await client.analyze({ uploadId: "upload-123", video: { segmentSeconds: 60 } });
+
+    const video = recorded?.body["video"] as Record<string, unknown> | undefined;
+    expect(video).toMatchObject({ segment_seconds: 60 });
+    expect(video?.["clip_start_seconds"]).toBeUndefined();
+    expect(video?.["clip_duration_seconds"]).toBeUndefined();
+  });
+
   it("sends upload session payload with correct keys", async () => {
     let recorded: RecordedRequest | null = null;
     const started = await startServer(async (req, res) => {
@@ -187,5 +276,69 @@ describe("EnriProxyClient request payloads", () => {
       content_type: "video/mp4",
       client_trace_id: "trace-1"
     });
+  });
+
+  it("embeds the parsed Spanish server detail in HTTP errors", async () => {
+    const started = await startServer(async (_req, res) => {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: { message: "La cuota de análisis se agotó.", code: "quota" } }));
+    });
+    server = started.server;
+
+    const client = new EnriProxyClient({
+      baseUrl: started.baseUrl,
+      apiKey: "test-key",
+      timeoutMs: 1000
+    });
+
+    const failure = await client
+      .createUploadSession({ filename: "clip.mp4", sizeBytes: 10, contentType: "video/mp4" })
+      .then(
+        () => null,
+        (error: unknown) => error as { message: string; status: number; body: string }
+      );
+
+    expect(failure).not.toBeNull();
+    expect(failure?.status).toBe(400);
+    expect(failure?.message).toMatch(/HTTP 400/u);
+    expect(failure?.message).toMatch(/La cuota de análisis se agotó/u);
+    expect(failure?.body).toContain("cuota");
+  });
+
+  it("reports non-JSON success bodies with a Spanish error", async () => {
+    const started = await startServer(async (_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "text/html");
+      res.end("<html><body>proxy caído</body></html>");
+    });
+    server = started.server;
+
+    const client = new EnriProxyClient({
+      baseUrl: started.baseUrl,
+      apiKey: "test-key",
+      timeoutMs: 1000
+    });
+
+    await expect(client.analyze({ uploadId: "upload-123" })).rejects.toThrow(
+      /no es JSON válido.*HTTP 200/u
+    );
+    await expect(client.analyze({ uploadId: "upload-123" })).rejects.not.toThrow(/Unexpected token/u);
+  });
+
+  it("reports missing or invalid Upload-Offset headers in Spanish", async () => {
+    const missing = await startServer(async (_req, res) => {
+      res.statusCode = 200;
+      res.end();
+    });
+    server = missing.server;
+
+    const client = new EnriProxyClient({
+      baseUrl: missing.baseUrl,
+      apiKey: "test-key",
+      timeoutMs: 1000
+    });
+
+    await expect(client.getUploadOffset("upload-123")).rejects.toThrow(/Upload-Offset/u);
   });
 });

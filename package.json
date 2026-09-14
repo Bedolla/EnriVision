@@ -1,6 +1,6 @@
 {
   "name": "@bedolla/enrivision",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "MCP server that uploads local media to EnriProxy and returns server-side analysis (resumable uploads).",
   "keywords": [
     "mcp",
@@ -50,6 +50,7 @@
   "devDependencies": {
     "@types/mime-types": "^3.0.1",
     "@types/node": "25.0.3",
+    "fast-check": "^4.10.0",
     "typescript": "5.9.3",
     "vitest": "4.0.16"
   },

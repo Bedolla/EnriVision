@@ -11,7 +11,7 @@ This is useful for media types that many MCP clients cannot read reliably (video
 
 ## Requirements
 
-- Node.js `>= 22` (recommended: Node 24 LTS)
+- Node.js `>= 24`
 - A reachable EnriProxy server with these endpoints enabled:
   - `POST /v1/uploads`
   - `HEAD /v1/uploads/:id`
@@ -85,7 +85,7 @@ Example: no install (always uses whatever npm currently tags as `latest`)
   "EnriVision": {
     "type": "stdio",
     "command": "node",
-    "args": ["C:\\\\Users\\\\Administrator\\\\Projects\\\\EnriVision\\\\dist\\\\index.js"],
+    "args": ["C:\\Users\\Administrator\\Projects\\EnriVision\\dist\\index.js"],
     "env": {
       "ENRIPROXY_URL": "http://127.0.0.1:8787",
       "ENRIPROXY_API_KEY": "YOUR_ENRIPROXY_API_KEY",
@@ -104,9 +104,34 @@ EnriVision is configured via environment variables:
 - `ENRIPROXY_URL` (`string`, optional, default: `http://127.0.0.1:8787`)
 - `ENRIPROXY_API_KEY` (`string`, required)
 - `ENRIVISION_TIMEOUT_MS` (`string`, optional, default: `1800000`)
-  - Parsed as an integer (milliseconds). Uploads are performed in chunks; this timeout applies per request.
+  - Parsed as an integer (milliseconds). This is the operator cap: the per-call analyze timeout is `min(operator, mode budget)` with `single` = 10 min (one pass, fast/cheap), `multipass`/`auto` = 20 min (per-segment/batch map + reduce; `auto` may escalate to multipass server-side). Uploads are performed in chunks; per-chunk timeouts honor `min(operator, derived 30s..300s)` floored at 30 s (an operator budget below 30 s never forces tighter single-chunk budgets).
 - `ENRIVISION_DEFAULT_LANGUAGE` (`string`, optional)
   - Default language to send when the tool call does not provide `language`.
+- `ENRIVISION_DENY_SYMLINKS` (`string`, optional)
+  - Set to `1` to reject symlinked `path`/`paths` inputs. Strict mode opens with `O_NOFOLLOW` (POSIX) and compares the `dev:ino` handle identity from `fstat`. On Windows (`win32`) `O_NOFOLLOW` is `0` (advisory only), so strict mode there rests solely on the `lstat`-vs-`fstat` comparison with a small swap window: prefer POSIX hosts when symlink races are in scope.
+- `ENRIVISION_MODEL` (`string`, optional)
+  - Model id for server-side dispatch affinity; omit for auto-dispatch.
+- `ENRIVISION_QUIET` (`string`, optional)
+  - Set to `1` to silence upload/retry progress lines on stderr.
+
+## Analysis budgets
+
+The client analyze timeout is `min(ENRIVISION_TIMEOUT_MS, mode budget)`:
+
+- `single` → 10 min (mirrors EnriCode and the EnriProxy single-pass stage budget).
+- `multipass` → 20 min (mirrors EnriCode and the server multipass wall-clock budget).
+- `auto` (default) → 20 min: the server picks the mode and may escalate to multipass, so the client cannot assume the short budget. If unsure, omit tuning (`auto`).
+
+## Error shape
+
+Tool failures return MCP `isError` with Spanish-first bilingual text (ES first, EN second) plus machine-readable `structuredContent: { code, retryable, httpStatus? }` reusing the EnriCode vocabulary:
+
+- `ENRICODE_ERR_TOOL_INPUT_INVALID` — argument/tuning errors (including proxy 400/422). Never retry unchanged (`retryable: false`).
+- `ENRICODE_ERR_TOOL_EXECUTION_FAILED` — server/transport failures. `retryable` is true for 408/429/5xx, false otherwise.
+- `ENRICODE_ERR_TOOL_EXECUTION_TIMEOUT` — expired upload/analyze budgets (`retryable: true`; retry with a smaller scope).
+- `ENRICODE_ERR_TOOL_EXECUTION_ABORTED` — caller-cancelled (`retryable: false`).
+
+`httpStatus` is present only when the failure carries a proxy HTTP status.
 
 ## MCP tools
 
@@ -120,7 +145,7 @@ EnriVision exposes this MCP tool:
 General notes:
 
 - The tool accepts a single JSON object as its input (the MCP `arguments`).
-- Exactly one of `path` or `paths` is required.
+- At least one of `path` or `paths` is required. When `paths` carries at least one valid entry, `path` is ignored (explicit ignore-path contract: sending both is allowed, `path` is silently ignored — prefer oneOf semantics and send only one).
 - Paths must be absolute on the machine running the MCP server, or http(s) URLs. URLs are downloaded to a temporary directory on the MCP host (up to 64 MiB each; localhost and private-network destinations are blocked) and deleted after analysis.
 - EnriVision does not accept per-call `server_url`/`api_key` overrides (these are configured via env vars).
 
@@ -135,7 +160,7 @@ Inputs:
 - `language` (`string`, optional): preferred response language (ISO 639-1; e.g., `es`, `en`). If omitted, uses `ENRIVISION_DEFAULT_LANGUAGE` when set.
 - `analysis_mode` (`string`, optional): `auto` | `single` | `multipass`.
 - `max_frames` (`number`, optional): single-pass video frames (`1..20`).
-- `transcribe` (`boolean`, optional): enable/disable transcription (videos).
+- `transcribe` (`boolean`, optional): enable/disable transcription (videos). Has no effect on images/documents (declared in `warnings`, ignored).
 - `transcription_language` (`string`, optional): whisper hint (`auto`, `es`, `en`, ...).
 
 Video targeting:
@@ -169,7 +194,7 @@ Example `arguments` object:
 
 ```jsonc
 {
-  "path": "C:\\\\path\\\\to\\\\video.mp4",
+  "path": "C:\\path\\to\\video.mp4",
   "question": "What are the key steps demonstrated?",
   "analysis_mode": "auto",
   "transcribe": true,

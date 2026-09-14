@@ -43,19 +43,19 @@ describe("AnalyzeMediaTool.parseParams", () => {
         clip_start_seconds: "12.5",
         clip_duration_seconds: "30",
         segment_seconds: "60",
-        max_segments: "100",
+        max_segments: "60",
         max_frames_per_segment: "8"
       },
       document: {
-        max_pages_total: "500",
+        max_pages_total: "150",
         pages_per_batch: "25",
         max_images_per_batch: "6",
         scanned_text_threshold_chars: "40"
       },
       audio: {
         timestamps: true,
-        segment_seconds: "15",
-        max_segments: "10"
+        segment_seconds: "60",
+        max_segments: "60"
       }
     });
 
@@ -70,15 +70,15 @@ describe("AnalyzeMediaTool.parseParams", () => {
     expect(params.video?.clipStartSeconds).toBe(12.5);
     expect(params.video?.clipDurationSeconds).toBe(30);
     expect(params.video?.segmentSeconds).toBe(60);
-    expect(params.video?.maxSegments).toBe(100);
+    expect(params.video?.maxSegments).toBe(60);
     expect(params.video?.maxFramesPerSegment).toBe(8);
-    expect(params.document?.maxPagesTotal).toBe(500);
+    expect(params.document?.maxPagesTotal).toBe(150);
     expect(params.document?.pagesPerBatch).toBe(25);
     expect(params.document?.maxImagesPerBatch).toBe(6);
     expect(params.document?.scannedTextThresholdChars).toBe(40);
     expect(params.audio?.timestamps).toBe(true);
-    expect(params.audio?.segmentSeconds).toBe(15);
-    expect(params.audio?.maxSegments).toBe(10);
+    expect(params.audio?.segmentSeconds).toBe(60);
+    expect(params.audio?.maxSegments).toBe(60);
   });
 
   it("accepts non-absolute paths when they are http(s) URLs", () => {
@@ -236,7 +236,7 @@ describe("AnalyzeMediaTool.parseParams", () => {
 });
 
 describe("AnalyzeMediaTool output sanitization", () => {
-  it("strips internal multipass/model routing fields from extraction", () => {
+  it("preserves server coverage metadata while stripping routing internals", () => {
     const tool = new AnalyzeMediaTool({
       createClient: () => {
         throw new Error("not used");
@@ -276,14 +276,15 @@ describe("AnalyzeMediaTool output sanitization", () => {
     expect(sanitized).toHaveProperty("timeline");
     expect(sanitized).toHaveProperty("segment_summaries");
     expect(sanitized).not.toHaveProperty("upload_id");
-    expect(sanitized).not.toHaveProperty("detected_media_type");
-    expect(sanitized).not.toHaveProperty("analysis_mode_used");
-    expect(sanitized).not.toHaveProperty("multipass");
-    expect(sanitized).not.toHaveProperty("model");
+    expect(sanitized).toHaveProperty("detected_media_type", "video");
+    expect(sanitized).toHaveProperty("analysis_mode_used", "multipass");
+    expect(sanitized).toHaveProperty("multipass");
+    const multipass = (sanitized as Record<string, unknown>)["multipass"] as Record<string, unknown>;
+    expect((multipass["reduce"] as Record<string, unknown>)["model"]).toBe("Some-Internal-Model");
     expect(sanitized).toHaveProperty("nested");
     const nested = (sanitized as Record<string, unknown>)["nested"];
     expect(nested).toBeTypeOf("object");
-    expect(nested as Record<string, unknown>).not.toHaveProperty("model");
+    expect(nested as Record<string, unknown>).toHaveProperty("model", "Some-Internal-Model");
   });
 });
 
@@ -332,6 +333,7 @@ describe("AnalyzeMediaTool URL execution", () => {
         fetch: vi.fn(async (): Promise<MediaUrlFetchResult> => ({
           localPath: downloadedPath,
           contentType: "image/webp",
+          extensionSynthesized: false,
           cleanup
         }))
       } as unknown as MediaUrlFetcher;
@@ -342,11 +344,45 @@ describe("AnalyzeMediaTool URL execution", () => {
       expect(result.analysis).toBe("ok");
       expect(result.media_type).toBe("image");
       expect(result.extraction).not.toHaveProperty("upload_id");
-      expect(stubFetcher.fetch).toHaveBeenCalledWith("https://example.test/media/remote-media");
+      expect(stubFetcher.fetch).toHaveBeenCalledWith("https://example.test/media/remote-media", {
+        signal: undefined
+      });
       expect(sessions.length).toBe(1);
       expect(sessions[0]?.filename).toBe("remote-media.bin");
       expect(sessions[0]?.contentType).toBe("image/webp");
       expect(sessions[0]?.sizeBytes).toBe(bytes.byteLength);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers the server content type when the download extension was synthesized", async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "enrivision-tool-"));
+    const sessions: Array<{ filename: string; contentType: string; sizeBytes: number }> = [];
+    const bytes = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4]);
+    try {
+      // Simulates a URL without extension serving webp: the fetcher
+      // synthesized a generic `.png` name, which must not win over webp.
+      const downloadedPath = join(temporaryDirectory, "media.png");
+      await writeFile(downloadedPath, bytes);
+      const cleanup = vi.fn();
+
+      const stubFetcher = {
+        fetch: vi.fn(async (): Promise<MediaUrlFetchResult> => ({
+          localPath: downloadedPath,
+          contentType: "image/webp",
+          extensionSynthesized: true,
+          cleanup
+        }))
+      } as unknown as MediaUrlFetcher;
+
+      const tool = new AnalyzeMediaTool(createStubDeps(sessions) as never, stubFetcher);
+      const result = await tool.execute({ path: "https://example.test/media/photo" });
+
+      expect(result.analysis).toBe("ok");
+      expect(sessions.length).toBe(1);
+      expect(sessions[0]?.contentType).toBe("image/webp");
       expect(cleanup).toHaveBeenCalledTimes(1);
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true });
@@ -367,7 +403,12 @@ describe("AnalyzeMediaTool URL execution", () => {
         fetch: vi.fn(async (): Promise<MediaUrlFetchResult> => {
           const index = callIndex;
           callIndex += 1;
-          return { localPath: downloadedPaths[index]!, contentType: "image/png", cleanup: cleanups[index]! };
+          return {
+            localPath: downloadedPaths[index]!,
+            contentType: "image/png",
+            extensionSynthesized: false,
+            cleanup: cleanups[index]!
+          };
         })
       } as unknown as MediaUrlFetcher;
 
@@ -383,6 +424,164 @@ describe("AnalyzeMediaTool URL execution", () => {
       expect(sessions[0]?.contentType).toBe("application/vnd.enrivision.media-set+tar");
       expect(cleanups[0]).toHaveBeenCalledTimes(1);
       expect(cleanups[1]).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("AnalyzeMediaTool knob validation", () => {
+  /**
+   * Creates one tool instance with an unused client factory.
+   *
+   * @returns Tool instance.
+   */
+  function createTool(): AnalyzeMediaTool {
+    return new AnalyzeMediaTool({
+      createClient: () => {
+        throw new Error("not used");
+      },
+      defaultServerUrl: "http://127.0.0.1:8787",
+      defaultApiKey: "test",
+      defaultTimeoutMs: 1000
+    });
+  }
+
+  it("rejects out-of-range knobs with Spanish errors", () => {
+    const tool = createTool();
+    const base = "C:\\Users\\User\\Downloads\\clip.mp4";
+
+    expect(() => tool.parseParams({ path: base, max_frames: 0 })).toThrow(/max_frames.*1.*20/u);
+    expect(() => tool.parseParams({ path: base, max_frames: 21 })).toThrow(/max_frames.*1.*20/u);
+    expect(() => tool.parseParams({ path: base, max_frames: "abc" })).toThrow(/max_frames.*1.*20/u);
+    expect(() =>
+      tool.parseParams({ path: base, video: { segment_seconds: 4 } })
+    ).toThrow(/video\.segment_seconds.*5.*600/u);
+    expect(() =>
+      tool.parseParams({ path: base, video: { segment_seconds: 601 } })
+    ).toThrow(/video\.segment_seconds.*5.*600/u);
+    expect(() =>
+      tool.parseParams({ path: base, video: { max_segments: 0 } })
+    ).toThrow(/video\.max_segments.*1.*60/u);
+    expect(() =>
+      tool.parseParams({ path: base, video: { max_frames_per_segment: 21 } })
+    ).toThrow(/video\.max_frames_per_segment.*1.*20/u);
+    expect(() =>
+      tool.parseParams({ path: base, video: { clip_duration_seconds: -5 } })
+    ).toThrow(/video\.clip_duration_seconds.*mayor que 0/u);
+    expect(() =>
+      tool.parseParams({ path: base, document: { max_pages_total: 2001 } })
+    ).toThrow(/document\.max_pages_total.*1.*200/u);
+    expect(() =>
+      tool.parseParams({ path: base, audio: { segment_seconds: 1 } })
+    ).toThrow(/audio\.segment_seconds.*5.*600/u);
+    expect(() =>
+      tool.parseParams({ path: base, audio: { max_segments: 2001 } })
+    ).toThrow(/audio\.max_segments.*1.*60/u);
+    expect(() =>
+      tool.parseParams({ path: base, audio: { timestamps: "yes" } })
+    ).toThrow(/audio\.timestamps.*booleano/u);
+  });
+
+  it("accepts boundary knob values", () => {
+    const tool = createTool();
+    const params = tool.parseParams({
+      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      max_frames: 20,
+      video: {
+        clip_start_seconds: 0,
+        clip_duration_seconds: 0.5,
+        segment_seconds: 5,
+        max_segments: 60,
+        max_frames_per_segment: 1
+      },
+      document: { max_pages_total: 1 },
+      audio: { segment_seconds: 5, max_segments: 60 }
+    });
+
+    expect(params.maxFrames).toBe(20);
+    expect(params.video?.segmentSeconds).toBe(5);
+    expect(params.video?.maxSegments).toBe(60);
+    expect(params.video?.maxFramesPerSegment).toBe(1);
+    expect(params.document?.maxPagesTotal).toBe(1);
+    expect(params.audio?.segmentSeconds).toBe(5);
+  });
+});
+
+describe("AnalyzeMediaTool cancellation", () => {
+  it("rejects immediately when the signal is already aborted", async () => {
+    const createClient = vi.fn(() => {
+      throw new Error("must not be called");
+    });
+    const tool = new AnalyzeMediaTool({
+      createClient: createClient as never,
+      defaultServerUrl: "http://127.0.0.1:8787",
+      defaultApiKey: "test",
+      defaultTimeoutMs: 1000
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      tool.execute({ path: "C:\\Users\\User\\Downloads\\clip.mp4" }, { signal: controller.signal })
+    ).rejects.toThrow(/cancelada/u);
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it("forwards the signal to URL downloads and the analyze call", async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "enrivision-tool-"));
+    try {
+      const downloadedPath = join(temporaryDirectory, "shot.png");
+      await writeFile(downloadedPath, new Uint8Array([1, 2, 3]));
+
+      const seenSignals: Array<AbortSignal | undefined> = [];
+      const stubFetcher = {
+        fetch: vi.fn(async (_url: string, options?: { signal?: AbortSignal }) => {
+          seenSignals.push(options?.signal);
+          return {
+            localPath: downloadedPath,
+            contentType: "image/png",
+            extensionSynthesized: false,
+            cleanup: vi.fn()
+          };
+        })
+      } as unknown as MediaUrlFetcher;
+
+      let analyzeSignal: AbortSignal | undefined | null = null;
+      const tool = new AnalyzeMediaTool(
+        {
+          createClient: () =>
+            ({
+              createUploadSession: async () => ({
+                upload_id: "upload_1",
+                chunk_size_bytes: 1024 * 1024,
+                expires_at: Date.now() + 60_000
+              }),
+              getUploadOffset: async () => 0,
+              appendUploadChunk: async (request: { offset: number; chunk: Buffer }) =>
+                request.offset + request.chunk.length,
+              analyze: async (request: { signal?: AbortSignal }) => {
+                analyzeSignal = request.signal ?? null;
+                return { analysis: "ok", media_type: "image", extraction: {} };
+              }
+            }) as never,
+          defaultServerUrl: "http://127.0.0.1:8787",
+          defaultApiKey: "test",
+          defaultTimeoutMs: 1000
+        },
+        stubFetcher
+      );
+
+      const controller = new AbortController();
+      const result = await tool.execute(
+        { path: "https://example.test/shot" },
+        { signal: controller.signal }
+      );
+
+      expect(result.analysis).toBe("ok");
+      expect(seenSignals[0]).toBe(controller.signal);
+      expect(analyzeSignal).toBe(controller.signal);
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true });
     }

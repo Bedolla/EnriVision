@@ -147,4 +147,54 @@ describe("MediaUrlFetcher", () => {
     );
     await expect(fetcher.fetch("https://example.test/missing.png")).rejects.toThrow(/404/u);
   });
+
+  it("derives a precise extension for extensionless URLs serving webp", async () => {
+    const webp: Uint8Array = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3]);
+    const fetcher = new MediaUrlFetcher(
+      createFetchStub(webp, "image/webp"),
+      createResolverStub(["93.184.216.34"])
+    );
+
+    const result = await fetcher.fetch("https://example.test/media/photo");
+
+    try {
+      expect(result.contentType).toBe("image/webp");
+      expect(result.extensionSynthesized).toBe(true);
+      expect(result.localPath.endsWith("photo.webp")).toBe(true);
+      expect(existsSync(result.localPath)).toBe(true);
+    } finally {
+      await result.cleanup();
+    }
+  });
+
+  it("keeps real URL extensions untouched and flags them as authored", async () => {
+    const png: Uint8Array = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1]);
+    const fetcher = new MediaUrlFetcher(
+      createFetchStub(png, "image/png"),
+      createResolverStub(["93.184.216.34"])
+    );
+
+    const result = await fetcher.fetch("https://example.test/pics/shot.png");
+
+    try {
+      expect(result.extensionSynthesized).toBe(false);
+      expect(result.localPath.endsWith("shot.png")).toBe(true);
+    } finally {
+      await result.cleanup();
+    }
+  });
+
+  it("rejects immediately when the caller signal is already aborted", async () => {
+    const fetchImpl = (async (): Promise<Response> => {
+      throw new Error("must not be called");
+    }) as unknown as typeof fetch;
+    const fetcher = new MediaUrlFetcher(fetchImpl, createResolverStub(["93.184.216.34"]));
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      fetcher.fetch("https://example.test/pics/shot.png", { signal: controller.signal })
+    ).rejects.toThrow(/cancelada/u);
+  });
 });

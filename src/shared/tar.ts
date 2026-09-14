@@ -39,7 +39,65 @@ export type TarEntrySource =
        * File size in bytes.
        */
       readonly sizeBytes: number;
+
+      /**
+       * Expected file identity (`ino:size:mtime:birthtime:nlink`) captured
+       * at stage time, or undefined when the caller skips TOCTOU checks.
+       *
+       * @remarks
+       * Compared against the just-opened handle (`fstat`, never a path
+       * re-stat) on first read, so a same-size replacement swapped in
+       * between staging and streaming fails loudly instead of shipping
+       * wrong bytes.
+       */
+      readonly expectedIdentity?: string;
     };
+
+/**
+ * Minimal file stats consumed by a {@link TarIdentityDescriber}.
+ */
+export interface TarFileIdentityStats {
+  /**
+   * Inode number.
+   */
+  readonly ino: number;
+
+  /**
+   * File size in bytes.
+   */
+  readonly size: number;
+
+  /**
+   * Modification time in milliseconds.
+   */
+  readonly mtimeMs: number;
+
+  /**
+   * Creation time in milliseconds (0 when unavailable).
+   */
+  readonly birthtimeMs?: number;
+
+  /**
+   * Hard-link count (0 when unavailable).
+   */
+  readonly nlink?: number;
+}
+
+/**
+ * Describes a stable file identity string for TOCTOU comparison.
+ */
+export type TarIdentityDescriber = (stats: TarFileIdentityStats) => string;
+
+/**
+ * Options for {@link TarStream}.
+ */
+export interface TarStreamOptions {
+  /**
+   * Identity describer matching `expectedIdentity` strings, or undefined
+   * when entries carry no identity expectations.
+   */
+  readonly describeIdentity?: TarIdentityDescriber;
+}
 
 /**
  * Tar entry description.
@@ -127,6 +185,21 @@ export function computeTarSizeBytes(entries: ReadonlyArray<TarEntry>): number {
 }
 
 /**
+ * One `TarStream.readNext` step.
+ */
+interface TarReadStep {
+  /**
+   * Bytes read (a scratch view, a zero-copy source view, or a fresh zero block).
+   */
+  readonly data: Buffer;
+
+  /**
+   * How many `data` bytes alias the caller-provided scratch.
+   */
+  readonly scratchBytes: number;
+}
+
+/**
  * Streaming tar generator that can start from an arbitrary byte offset.
  */
 export class TarStream {
@@ -141,18 +214,24 @@ export class TarStream {
   private readonly totalSizeBytes: number;
 
   /**
+   * Identity describer for staged file expectations.
+   */
+  private readonly describeIdentity: TarIdentityDescriber | undefined;
+
+  /**
    * Creates a new {@link TarStream}.
    *
-   * @param entries - Tar entries in order
+   * @param entries - Tar entries in order.
+   * @param options - Optional identity describer for TOCTOU checks.
    */
-  public constructor(entries: ReadonlyArray<TarEntry>) {
+  public constructor(entries: ReadonlyArray<TarEntry>, options?: TarStreamOptions) {
     const normalized: TarLayoutEntry[] = [];
     let cursor = 0;
 
     for (const entry of entries) {
       const name = entry.name;
       if (!isSafeTarName(name)) {
-        throw new Error(`Invalid tar entry name: ${name}`);
+        throw new Error(`Nombre de entrada tar inválido: ${name} / Invalid tar entry name: ${name}.`);
       }
 
       const contentSize =
@@ -178,6 +257,7 @@ export class TarStream {
 
     this.layout = normalized;
     this.totalSizeBytes = cursor + 1024;
+    this.describeIdentity = options?.describeIdentity;
   }
 
   /**
@@ -191,6 +271,13 @@ export class TarStream {
 
   /**
    * Iterates tar bytes as chunks, starting from a given offset.
+   *
+   * @remarks
+   * File-backed reads land in one scratch per yielded chunk (subarray
+   * views, no per-read allocation); header, padding, zero, and in-memory
+   * reads keep their existing zero-copy views. The scratch is fresh for
+   * every iteration, so retaining a yielded chunk across `next()` calls
+   * stays valid — the next chunk never overwrites it.
    *
    * @param startOffset - Starting byte offset (for resumable uploads)
    * @param chunkSize - Maximum bytes per yielded chunk
@@ -211,34 +298,48 @@ export class TarStream {
 
     const state = this.seek(position);
 
-    while (position < this.totalSizeBytes) {
-      const remainingTar = this.totalSizeBytes - position;
-      const desired = Math.min(normalizedChunk, remainingTar);
+    try {
+      while (position < this.totalSizeBytes) {
+        const remainingTar = this.totalSizeBytes - position;
+        const desired = Math.min(normalizedChunk, remainingTar);
 
-      const parts: Buffer[] = [];
-      let remaining = desired;
-      let emptyReadsInARow = 0;
+        // One scratch per yielded chunk: file-backed reads land in subarray
+        // views of it, so a chunk crossing N entries costs one allocation
+        // instead of N (the concat copy survives only when mixed with
+        // header/zero/in-memory views). Fresh per iteration, so chunks
+        // retained across next() calls stay valid.
+        const scratch: Buffer = Buffer.allocUnsafe(desired);
+        let scratchUsed: number = 0;
+        const parts: Buffer[] = [];
+        let remaining = desired;
+        let emptyReadsInARow = 0;
 
-      while (remaining > 0) {
-        const read = await this.readNext(state, remaining);
-        if (read.length <= 0) {
-          emptyReadsInARow += 1;
-          if (emptyReadsInARow > 50) {
-            break;
+        while (remaining > 0) {
+          const read = await this.readNext(state, remaining, scratch.subarray(scratchUsed));
+          if (read.data.length <= 0) {
+            emptyReadsInARow += 1;
+            if (emptyReadsInARow > 50) {
+              break;
+            }
+            continue;
           }
-          continue;
+          emptyReadsInARow = 0;
+          parts.push(read.data);
+          scratchUsed += read.scratchBytes;
+          remaining -= read.data.length;
+          position += read.data.length;
         }
-        emptyReadsInARow = 0;
-        parts.push(read);
-        remaining -= read.length;
-        position += read.length;
-      }
 
-      if (parts.length === 0) {
-        break;
-      }
+        if (parts.length === 0) {
+          break;
+        }
 
-      yield parts.length === 1 ? parts[0] : Buffer.concat(parts);
+        yield parts.length === 1 ? parts[0]! : Buffer.concat(parts);
+      }
+    } finally {
+      // The caller may abandon the iterator early (for-await break on offset
+      // resync); always release the file handle so descriptors do not leak.
+      await this.closeFileHandle(state);
     }
   }
 
@@ -277,6 +378,12 @@ export class TarStream {
 
   /**
    * Reads up to maxBytes from the current state and advances the state.
+   *
+   * @param state - Mutable seek state.
+   * @param maxBytes - Maximum bytes to read.
+   * @param scratch - Unused tail of the caller-owned per-chunk scratch;
+   * file-backed reads land in its leading view when it fits.
+   * @returns Step bytes plus how many alias `scratch`.
    */
   private async readNext(
     state: {
@@ -285,18 +392,19 @@ export class TarStream {
       phaseOffset: number;
       fileHandle: Awaited<ReturnType<typeof open>> | null;
     },
-    maxBytes: number
-  ): Promise<Buffer> {
+    maxBytes: number,
+    scratch: Buffer
+  ): Promise<TarReadStep> {
     const want = Math.max(1, Math.floor(maxBytes));
 
     if (state.phase === "eof") {
       const remaining = Math.max(0, 1024 - state.phaseOffset);
       if (remaining <= 0) {
-        return Buffer.alloc(0);
+        return { data: Buffer.alloc(0), scratchBytes: 0 };
       }
       const take = Math.min(want, remaining);
       state.phaseOffset += take;
-      return Buffer.alloc(take, 0);
+      return { data: Buffer.alloc(take, 0), scratchBytes: 0 };
     }
 
     const entry = this.layout[state.entryIndex]!;
@@ -310,7 +418,7 @@ export class TarStream {
         state.phase = "entry_content";
         state.phaseOffset = 0;
       }
-      return out;
+      return { data: out, scratchBytes: 0 };
     }
 
     if (state.phase === "entry_content") {
@@ -319,7 +427,7 @@ export class TarStream {
         state.phase = "entry_padding";
         state.phaseOffset = 0;
         await this.closeFileHandle(state);
-        return Buffer.alloc(0);
+        return { data: Buffer.alloc(0), scratchBytes: 0 };
       }
       const take = Math.min(want, remaining);
 
@@ -330,27 +438,35 @@ export class TarStream {
           state.phase = "entry_padding";
           state.phaseOffset = 0;
         }
-        return buf;
+        return { data: buf, scratchBytes: 0 };
       }
 
-      const handle = await this.ensureFileHandle(state, entry.source.path);
-      const buffer = Buffer.allocUnsafe(take);
-      const read = await handle.read(buffer, 0, take, state.phaseOffset);
+      const handle = await this.ensureFileHandle(
+        state,
+        entry.source.path,
+        entry.source.type === "file" ? entry.source.expectedIdentity : undefined,
+      );
+      // Land in the caller scratch when it fits so a chunk crossing N
+      // entries costs one allocation instead of N; the caller advances its
+      // cursor by scratchBytes and owns the sizing invariant.
+      const useScratch: boolean = scratch.length >= take;
+      const target: Buffer = useScratch ? scratch.subarray(0, take) : Buffer.allocUnsafe(take);
+      const read = await handle.read(target, 0, take, state.phaseOffset);
       if (read.bytesRead <= 0) {
         await this.closeFileHandle(state);
-        state.phase = "entry_padding";
-        state.phaseOffset = 0;
-        return Buffer.alloc(0);
+        throw new Error(
+          `El archivo cambió durante la subida (${entry.name}); reintente la llamada. / File changed during upload (${entry.name}); retry the call.`
+        );
       }
 
       state.phaseOffset += read.bytesRead;
-      const out = read.bytesRead === buffer.length ? buffer : buffer.subarray(0, read.bytesRead);
+      const out = read.bytesRead === target.length ? target : target.subarray(0, read.bytesRead);
       if (state.phaseOffset >= entry.contentSize) {
         await this.closeFileHandle(state);
         state.phase = "entry_padding";
         state.phaseOffset = 0;
       }
-      return out;
+      return { data: out, scratchBytes: useScratch ? read.bytesRead : 0 };
     }
 
     // entry_padding
@@ -364,7 +480,7 @@ export class TarStream {
       } else {
         state.phase = "entry_header";
       }
-      return Buffer.alloc(0);
+      return { data: Buffer.alloc(0), scratchBytes: 0 };
     }
 
     const take = Math.min(want, remaining);
@@ -379,21 +495,51 @@ export class TarStream {
         state.phase = "entry_header";
       }
     }
-    return Buffer.alloc(take, 0);
+    return { data: Buffer.alloc(take, 0), scratchBytes: 0 };
   }
 
   /**
    * Ensures a file handle is open for the current file-backed entry.
+   *
+   * @remarks
+   * When the entry carries an `expectedIdentity` and the stream has a
+   * describer, the just-opened handle is `fstat`-compared before any byte
+   * is read: a same-size swap between the 5 s path-stat checks and this
+   * open still fails loudly instead of shipping wrong bytes.
+   *
+   * @param state - Mutable seek state.
+   * @param filePath - File path to open.
+   * @param expectedIdentity - Staged identity to compare, or undefined to skip.
+   * @returns Open file handle.
+   * @throws Error with an Spanish-first bilingual message when the opened file identity differs.
    */
   private async ensureFileHandle(
     state: { fileHandle: Awaited<ReturnType<typeof open>> | null },
-    filePath: string
+    filePath: string,
+    expectedIdentity: string | undefined
   ): Promise<Awaited<ReturnType<typeof open>>> {
     if (state.fileHandle) {
       return state.fileHandle;
     }
-    state.fileHandle = await open(filePath, "r");
-    return state.fileHandle;
+    const handle = await open(filePath, "r");
+    state.fileHandle = handle;
+    if (typeof expectedIdentity === "string" && typeof this.describeIdentity === "function") {
+      const openedStats = await handle.stat();
+      const openedIdentity: string = this.describeIdentity({
+        ino: openedStats.ino,
+        size: openedStats.size,
+        mtimeMs: openedStats.mtimeMs,
+        birthtimeMs: openedStats.birthtimeMs,
+        nlink: openedStats.nlink,
+      });
+      if (openedIdentity !== expectedIdentity) {
+        await this.closeFileHandle(state);
+        throw new Error(
+          `El archivo cambió mientras se subía (${filePath}); reintente la llamada con archivos estables. / File changed while uploading (${filePath}); retry the call with stable files.`
+        );
+      }
+    }
+    return handle;
   }
 
   /**
