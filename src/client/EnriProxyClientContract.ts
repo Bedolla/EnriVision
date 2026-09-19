@@ -105,6 +105,17 @@ export interface AnalyzeVisionResponse {
   readonly media_type: string;
 
   /**
+   * Model id that effectively served the analysis (server-side dispatch),
+   * when the server reports one.
+   */
+  readonly model?: string;
+
+  /**
+   * Server-side request id for correlation, when the server reports one.
+   */
+  readonly request_id?: string;
+
+  /**
    * Extraction metadata.
    */
   readonly extraction: Record<string, unknown>;
@@ -130,24 +141,42 @@ export class EnriProxyHttpError extends Error {
   public readonly body: string;
 
   /**
+   * Stable machine-readable error code parsed from the body (`invalid_*`
+   * knob codes), when the server sent one.
+   */
+  public readonly serverCode?: string;
+
+  /**
+   * Dotted request field carrying the invalid value, when the server sent
+   * one.
+   */
+  public readonly serverField?: string;
+
+  /**
    * Creates a new {@link EnriProxyHttpError}.
    *
    * @param message - Error message
    * @param status - HTTP status code
    * @param headers - Response headers
    * @param body - Response body
+   * @param serverCode - Stable machine-readable error code, when parsed
+   * @param serverField - Dotted invalid-value field, when parsed
    */
   public constructor(
     message: string,
     status: number,
     headers: Record<string, string | string[] | undefined>,
-    body: string
+    body: string,
+    serverCode?: string,
+    serverField?: string
   ) {
     super(message);
     this.name = "EnriProxyHttpError";
     this.status = status;
     this.headers = headers;
     this.body = body;
+    this.serverCode = serverCode;
+    this.serverField = serverField;
   }
 }
 
@@ -512,15 +541,53 @@ export interface SegmentPageResponse {
 const MAX_SERVER_DETAIL_CHARS = 300;
 
 /**
+ * Stable machine-readable insight parsed from one non-2xx proxy body.
+ */
+export interface ServerErrorInsight {
+  /**
+   * Human-readable server detail, or null when none is recognizable.
+   */
+  readonly detail: string | null;
+
+  /**
+   * Stable machine-readable error code emitted by the proxy (for example
+   * `invalid_video`), when present.
+   */
+  readonly code?: string;
+
+  /**
+   * Dotted request field carrying the invalid value (for example
+   * `video.clip_duration_seconds`), when present.
+   */
+  readonly field?: string;
+}
+
+/**
  * Extracts a human-readable error detail from a non-2xx response body.
  *
  * @param body - Raw response body (best-effort UTF-8).
  * @returns Spanish-ready server detail, or null when none is recognizable.
  */
 export function extractServerErrorDetail(body: string): string | null {
+  return extractServerErrorInsight(body).detail;
+}
+
+/**
+ * Extracts the full stable insight (detail + machine code + field) from one
+ * non-2xx proxy body.
+ *
+ * @remarks
+ * EnriProxy knob-validation errors carry `code` (`invalid_<root>`) and a
+ * dotted `field` alongside the message so EnriVision/EnriCode can match on
+ * codes instead of Spanish prose; unknown shapes degrade to detail-only.
+ *
+ * @param body - Raw response body (best-effort UTF-8).
+ * @returns Parsed insight with optional stable code/field.
+ */
+export function extractServerErrorInsight(body: string): ServerErrorInsight {
   const trimmed: string = body.trim();
   if (!trimmed) {
-    return null;
+    return { detail: null };
   }
   try {
     const parsed: unknown = JSON.parse(trimmed);
@@ -528,25 +595,45 @@ export function extractServerErrorDetail(body: string): string | null {
       const record: Record<string, unknown> = parsed as Record<string, unknown>;
       const nested: unknown = record["error"];
       if (typeof nested === "string" && nested.trim()) {
-        return truncateCodePointsHeadTail(nested.trim(), MAX_SERVER_DETAIL_CHARS, 0).text;
+        return { detail: truncateCodePointsHeadTail(nested.trim(), MAX_SERVER_DETAIL_CHARS, 0).text };
       }
       if (nested && typeof nested === "object" && !Array.isArray(nested)) {
         const nestedRecord: Record<string, unknown> = nested as Record<string, unknown>;
         const nestedMessage: unknown = nestedRecord["message"];
+        const code: unknown = nestedRecord["code"] ?? record["code"];
+        const field: unknown = nestedRecord["field"] ?? record["field"];
         if (typeof nestedMessage === "string" && nestedMessage.trim()) {
-          return truncateCodePointsHeadTail(nestedMessage.trim(), MAX_SERVER_DETAIL_CHARS, 0).text;
+          return {
+            detail: truncateCodePointsHeadTail(nestedMessage.trim(), MAX_SERVER_DETAIL_CHARS, 0).text,
+            ...(typeof code === "string" && code.trim() ? { code: code.trim() } : {}),
+            ...(typeof field === "string" && field.trim() ? { field: field.trim() } : {}),
+          };
         }
       }
       const message: unknown = record["message"];
+      const code: unknown = record["code"];
+      const field: unknown = record["field"];
       if (typeof message === "string" && message.trim()) {
-        return truncateCodePointsHeadTail(message.trim(), MAX_SERVER_DETAIL_CHARS, 0).text;
+        return {
+          detail: truncateCodePointsHeadTail(message.trim(), MAX_SERVER_DETAIL_CHARS, 0).text,
+          ...(typeof code === "string" && code.trim() ? { code: code.trim() } : {}),
+          ...(typeof field === "string" && field.trim() ? { field: field.trim() } : {}),
+        };
+      }
+      // Code-only bodies (no message) still carry the stable classification.
+      if (typeof code === "string" && code.trim()) {
+        return {
+          detail: null,
+          code: code.trim(),
+          ...(typeof field === "string" && field.trim() ? { field: field.trim() } : {}),
+        };
       }
     }
   } catch {
     // Not JSON: fall through to the plain-text handling below.
   }
   if (trimmed.startsWith("<")) {
-    return null;
+    return { detail: null };
   }
-  return truncateCodePointsHeadTail(trimmed, MAX_SERVER_DETAIL_CHARS, 0).text;
+  return { detail: truncateCodePointsHeadTail(trimmed, MAX_SERVER_DETAIL_CHARS, 0).text };
 }

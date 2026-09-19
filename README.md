@@ -145,28 +145,37 @@ EnriVision exposes this MCP tool:
 General notes:
 
 - The tool accepts a single JSON object as its input (the MCP `arguments`).
-- At least one of `path` or `paths` is required. When `paths` carries at least one valid entry, `path` is ignored (explicit ignore-path contract: sending both is allowed, `path` is silently ignored — prefer oneOf semantics and send only one).
-- Paths must be absolute on the machine running the MCP server, or http(s) URLs. URLs are downloaded to a temporary directory on the MCP host (up to 64 MiB each; localhost and private-network destinations are blocked) and deleted after analysis.
+- At least one of `path`, `paths`, or `cursor` is required. When `paths` carries at least one valid entry, `path` is ignored (explicit ignore-path contract: sending both is allowed, `path` is silently ignored — prefer oneOf semantics and send only one). A `cursor` (from a truncated response) reads the next window of the list without uploading or analyzing anything.
+- Paths must be absolute on the machine running the MCP server, or http(s) URLs. URLs are downloaded to a temporary directory on the MCP host (up to 64 MiB each; localhost and private-network destinations are blocked) and deleted after analysis. A solitary URL above 64 MiB escalates to EnriProxy's server-side `source_url` ingestion (resumable download with extra hops); local files use resumable upload up to 4 GiB.
 - EnriVision does not accept per-call `server_url`/`api_key` overrides (these are configured via env vars).
 
 ### `analyze_media`
 
 Inputs:
 
-- `path` (`string`, optional): absolute local file path, or one http(s) URL to download and analyze (up to 64 MiB).
+- `path` (`string`, optional): absolute local file path, or one http(s) URL to download and analyze (up to 64 MiB; a solitary larger URL escalates to server-side `source_url` ingestion).
 - `paths` (`string[]`, optional): absolute local image paths or http(s) image URLs (useful for UI screenshot sets).
 - `context` (`string`, optional): high-level hint (examples: `ui`, `diagram`, `chart`, `error`, `code`, `meeting`, `tutorial`, `photo`).
 - `question` (`string`, optional): what you want to extract/answer.
 - `language` (`string`, optional): preferred response language (ISO 639-1; e.g., `es`, `en`). If omitted, uses `ENRIVISION_DEFAULT_LANGUAGE` when set.
 - `analysis_mode` (`string`, optional): `auto` | `single` | `multipass`.
 - `max_frames` (`number`, optional): single-pass video frames (`1..20`).
+- `model` (`string`, optional): model id for server-side dispatch affinity (max 128 chars; env `ENRIVISION_MODEL`; omit for auto-dispatch).
+- `region` (`object`, optional): relative `[0,1]` zoom box `{x, y, width, height}` for one image (native-resolution reading of small text); single images only.
 - `transcribe` (`boolean`, optional): enable/disable transcription (videos). Has no effect on images/documents (declared in `warnings`, ignored).
 - `transcription_language` (`string`, optional): whisper hint (`auto`, `es`, `en`, ...).
+
+Continuation:
+
+- `cursor` (`string`, optional): opaque cursor from a truncated response (`segment_summaries_cursor` or `transcription_segments_cursor`); reads the next window without re-analyzing.
+- `offset` (`integer`, optional): continuation start index (defaults to the response `next_offset`).
+- `limit` (`integer`, optional): continuation window length (`1..100`; defaults to the server window size).
 
 Video targeting:
 
 - `video.clip_start_seconds` (`number`, optional)
 - `video.clip_duration_seconds` (`number`, optional)
+- `video.clip_end_seconds` (`number`, optional; end = start + duration, wins over `clip_duration_seconds`)
 
 Multipass tuning (advanced; used only for `analysis_mode: multipass`):
 
@@ -234,6 +243,6 @@ Images:
 
 Documents:
 
-- `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.jsonl`
+- `.pdf`, `.docx`, `.pptx`, `.xlsx`
 
 </details>

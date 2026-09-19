@@ -2,10 +2,13 @@
  * ENRIPROXY CLIENT
  *
  * Minimal HTTP client for EnriProxy endpoints used by EnriVision:
- * - POST  /v1/uploads
- * - HEAD  /v1/uploads/:id
- * - PATCH /v1/uploads/:id
- * - POST  /v1/vision/analyze
+ * - POST   /v1/uploads
+ * - HEAD   /v1/uploads/:id
+ * - PATCH  /v1/uploads/:id
+ * - DELETE /v1/uploads/:id
+ * - POST   /v1/vision/analyze
+ * - POST   /v1/vision/segments
+ * - GET    /v1/account/models
  *
  * @module client/EnriProxyClient
  */
@@ -24,7 +27,8 @@ import {
 
 import {
   EnriProxyHttpError,
-  extractServerErrorDetail,
+  extractServerErrorInsight,
+  type ServerErrorInsight,
   type AnalyzeVisionElement,
   type AnalyzeVisionParams,
   type AnalyzeVisionResponse,
@@ -977,9 +981,18 @@ export class EnriProxyClient {
    * @returns HTTP error preserving status, headers, and body.
    */
   private static buildHttpError(baseMessage: string, result: EnriProxyHttpResult): EnriProxyHttpError {
-    const detail: string | null = extractServerErrorDetail(result.body);
-    const message: string = detail ? `${baseMessage} Detalle del servidor: ${detail}` : baseMessage;
-    return new EnriProxyHttpError(message, result.status, result.headers, result.body);
+    const insight: ServerErrorInsight = extractServerErrorInsight(result.body);
+    const fieldSuffix: string = insight.field !== undefined ? ` [campo/field: ${insight.field}]` : "";
+    const message: string =
+      insight.detail !== null ? `${baseMessage} Detalle del servidor: ${insight.detail}${fieldSuffix}` : baseMessage;
+    return new EnriProxyHttpError(
+      message,
+      result.status,
+      result.headers,
+      result.body,
+      insight.code,
+      insight.field
+    );
   }
 
   /**

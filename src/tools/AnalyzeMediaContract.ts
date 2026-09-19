@@ -399,6 +399,12 @@ export interface AnalyzeMediaToolParams {
   readonly offset?: number;
 
   /**
+   * Maximum entries to read in one continuation window (1-100; defaults to
+   * the server window size).
+   */
+  readonly continuationLimit?: number;
+
+  /**
    * Parser-generated honesty notes (Spanish-first bilingual, e.g., a clamped clip window).
    *
    * @remarks

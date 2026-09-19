@@ -143,7 +143,7 @@ export class AnalyzeMediaTool {
     // Continuation mode: no upload, no analysis, no filesystem touch — only
     // the next window of a previously truncated list.
     if (typeof params.cursor === "string") {
-      return await this.executeContinuation(client, params.cursor, params.offset, signal);
+      return await this.executeContinuation(client, params.cursor, params.offset, params.continuationLimit, signal);
     }
 
     const resolved = await this.inputResolver.resolve(params, signal);
@@ -303,6 +303,15 @@ export class AnalyzeMediaTool {
       const extraction: Record<string, unknown> = this.stripInternalExtractionFields(
         analysis.extraction,
       );
+      // Surface the effective model + correlation id from the server: the
+      // model id tells the caller which dispatch branch actually answered
+      // (useful with auto-dispatch and affinity hints).
+      if (typeof analysis.model === "string" && analysis.model.length > 0) {
+        extraction["model_used"] = analysis.model;
+      }
+      if (typeof analysis.request_id === "string" && analysis.request_id.length > 0) {
+        extraction["request_id"] = analysis.request_id;
+      }
 
       const result: AnalyzeMediaToolResult = {
         analysis: analysis.analysis,
@@ -643,6 +652,7 @@ export class AnalyzeMediaTool {
    * @param client - EnriProxy client.
    * @param cursor - Opaque cursor from a truncated response.
    * @param offset - Start index, or undefined for the stored next offset.
+   * @param limit - Window length (1-100), or undefined for the server default.
    * @param signal - Optional cancellation signal.
    * @returns Tool result carrying the page plus chaining state.
    */
@@ -650,11 +660,13 @@ export class AnalyzeMediaTool {
     client: ReturnType<AnalyzeMediaToolDeps["createClient"]>,
     cursor: string,
     offset: number | undefined,
+    limit: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<AnalyzeMediaToolResult> {
     const page = await client.fetchSegmentPage({
       cursor,
       ...(typeof offset === "number" ? { offset } : {}),
+      ...(typeof limit === "number" ? { limit } : {}),
       ...(typeof signal !== "undefined" ? { signal } : {}),
     });
     const lines: string[] = page.entries.map((entry: unknown): string => {

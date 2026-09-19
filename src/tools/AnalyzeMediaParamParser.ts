@@ -95,6 +95,7 @@ export class AnalyzeMediaParamParser {
     const paths: string[] | undefined = this.parsePaths(record["paths"]);
     const cursor: string | undefined = this.parseCursor(record["cursor"]);
     const offset: number | undefined = this.parseOffset(record["offset"]);
+    const continuationLimit: number | undefined = this.parseContinuationLimit(record["limit"]);
 
     // Continuation mode: a cursor reads the next window of a previously
     // truncated list without uploading or analyzing anything. Mixing it
@@ -102,7 +103,7 @@ export class AnalyzeMediaParamParser {
     // did not intend (or silently drop the files they meant to analyze).
     if (cursor !== undefined) {
       if (path !== undefined || (paths !== undefined && paths.length > 0)) {
-        throw new Error("cursor no se combina con 'path'/'paths': para continuar una lista truncada mande solo cursor (y offset opcional). / cursor cannot be combined with 'path'/'paths': to continue a truncated list send only cursor (plus optional offset).");
+        throw new Error("cursor no se combina con 'path'/'paths': para continuar una lista truncada mande solo cursor (y offset/limit opcionales). / cursor cannot be combined with 'path'/'paths': to continue a truncated list send only cursor (plus optional offset/limit).");
       }
     } else if (!path && (!paths || paths.length === 0)) {
       throw new Error("Proporcione 'path' o 'paths'. / Provide 'path' or 'paths'.");
@@ -164,6 +165,7 @@ export class AnalyzeMediaParamParser {
       paths,
       cursor,
       offset,
+      continuationLimit,
       context,
       question,
       language,
@@ -318,6 +320,23 @@ export class AnalyzeMediaParamParser {
     }
     if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0) {
       throw new Error("offset debe ser un entero mayor o igual que 0 (por defecto, el next_offset de la respuesta). / offset must be an integer greater than or equal to 0 (defaults to the response next_offset).");
+    }
+    return raw;
+  }
+
+  /**
+   * Parses the continuation window length.
+   *
+   * @param raw - Raw `limit` argument.
+   * @returns Validated limit, or undefined when absent.
+   * @throws Error with a Spanish-first bilingual message when present but not an integer in [1, 100].
+   */
+  private parseContinuationLimit(raw: unknown): number | undefined {
+    if (typeof raw === "undefined") {
+      return undefined;
+    }
+    if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1 || raw > 100) {
+      throw new Error("limit debe ser un entero entre 1 y 100 (por defecto, el tamaño de ventana del servidor). / limit must be an integer between 1 and 100 (defaults to the server window size).");
     }
     return raw;
   }
@@ -956,6 +975,7 @@ export const TOP_LEVEL_KNOWN_KEYS: ReadonlySet<string> = new Set([
   "clip_duration_seconds",
   "cursor",
   "offset",
+  "limit",
 ]);
 
 /**

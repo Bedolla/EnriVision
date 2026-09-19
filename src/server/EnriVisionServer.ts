@@ -246,6 +246,17 @@ export class EnriVisionServer {
         structuredContent: { code: ANALYZE_MEDIA_ERROR_CODES.executionFailed, retryable: false, httpStatus: status },
       };
     }
+    // Stable-code mapping (proxy knob-validation errors carry `invalid_*`
+    // codes + dotted fields): matches on the machine vocabulary instead of
+    // Spanish prose, even when the HTTP status was lost in transport.
+    const serverCode: unknown =
+      typeof error === "object" && error !== null ? (error as { readonly serverCode?: unknown })["serverCode"] : undefined;
+    if (typeof serverCode === "string" && serverCode.startsWith("invalid_")) {
+      return {
+        text: message,
+        structuredContent: { code: ANALYZE_MEDIA_ERROR_CODES.inputInvalid, retryable: false },
+      };
+    }
     if (/timed out|expiró|agotó el tiempo límite|exceeded the maximum time/u.test(message)) {
       return {
         text: message,
@@ -284,7 +295,13 @@ export class EnriVisionServer {
       return undefined;
     }
     const status: unknown = (error as { readonly status?: unknown })["status"];
-    return typeof status === "number" && Number.isFinite(status) ? Math.floor(status) : undefined;
+    if (typeof status !== "number" || !Number.isFinite(status)) {
+      return undefined;
+    }
+    const floored: number = Math.floor(status);
+    // HTTP statuses live in 100-599; 0 is the transport-level "no response"
+    // marker (socket errors) and must not mask the stable-code mapping.
+    return floored >= 100 && floored <= 599 ? floored : undefined;
   }
 
   /**
@@ -682,12 +699,13 @@ export class EnriVisionServer {
         "\n" +
         "Clip de video: para preguntas en un tiempo específico (\"¿qué pasa en 12:34?\") use video.clip_start_seconds + video.clip_duration_seconds: convierta a segundos (12:34 = 12*60+34 = 754), por ejemplo clip_start_seconds=754 y clip_duration_seconds=30. O dé video.clip_end_seconds (fin = inicio + duración, 0-86400 s).\n / Video clip targeting: for time-specific questions (\"what happens at 12:34?\") use video.clip_start_seconds + video.clip_duration_seconds: convert to seconds (12:34 = 12*60+34 = 754) and request a window, e.g. clip_start_seconds=754 and clip_duration_seconds=30. Or give video.clip_end_seconds instead (end = start + duration, 0-86400 s)." +
         "\n" +
-        "Enteros estrictos: los knobs enteros aceptan números o strings enteras completas (\"60\" vale; \"8.0\", \"8abc\" y 7.9 fallan). Los flotantes aceptan decimales (\"12.5\" vale). transcribe vale true por defecto y no tiene efecto en imágenes/documentos (se declara en warnings, se ignora). Requiere API key válida de EnriProxy (env ENRIVISION_API_KEY).\n / Strict integers: integer knobs accept numbers or complete integer strings (\"60\" works; \"8.0\", \"8abc\", 7.9 fail). Floats accept decimals (\"12.5\" works). transcribe defaults to true and has no effect on images/documents (declared in warnings, ignored). Requires a valid EnriProxy API key (env ENRIVISION_API_KEY, sent as Authorization: Bearer ...)." +
+        "Enteros estrictos: los knobs enteros aceptan números o strings enteras completas (\"60\" vale; \"8.0\", \"8abc\" y 7.9 fallan). Los flotantes aceptan decimales (\"12.5\" vale). transcribe vale true por defecto y no tiene efecto en imágenes/documentos (se declara en warnings, se ignora). Requiere API key válida de EnriProxy (env ENRIPROXY_API_KEY).\n / Strict integers: integer knobs accept numbers or complete integer strings (\"60\" works; \"8.0\", \"8abc\", 7.9 fail). Floats accept decimals (\"12.5\" works). transcribe defaults to true and has no effect on images/documents (declared in warnings, ignored). Requires a valid EnriProxy API key (env ENRIPROXY_API_KEY, sent as Authorization: Bearer ...)." +
         "\n" +
         "Errores: las fallas devuelven isError con texto bilingüe más structuredContent {code, retryable, httpStatus?} con el vocabulario EnriCode; retryable marca 429/5xx/timeouts. Si el mensaje trae `Detalle del servidor:` en el idioma del proxy, repórtelo tal cual. Fotogramas y transcripción comparten la MISMA línea de tiempo. `model` es el id del modelo para afinidad de dispatch (máximo 128 caracteres o env ENRIVISION_MODEL; omita para auto-dispatch). `language` controla el idioma de la RESPUESTA; `transcription_language` aparte el idioma que Whisper espera al TRANSCRIBIR (\"auto\" = detectar solo).\n / Errors: failures return isError with bilingual text plus structuredContent {code, retryable, httpStatus?} reusing the EnriCode vocabulary (ENRICODE_ERR_TOOL_INPUT_INVALID / EXECUTION_FAILED / EXECUTION_TIMEOUT / EXECUTION_ABORTED); retryable marks 429/5xx/timeouts. If the message carries a `Detalle del servidor:` fragment in the proxy language, report it verbatim. Video frames and transcription share the SAME video timeline. Animated GIF/WebP/APNG/SVG become representative key frames. `model` is the active model id for server-side dispatch affinity (max 128 chars, or env ENRIVISION_MODEL; omit for auto-dispatch). Set `language` (e.g. \"es\") to match the user language and avoid drift: `language` controls the analysis RESPONSE language; `transcription_language` separately controls the language Whisper expects when TRANSCRIBING audio (\"auto\" = detect only)." +
         "\n" +
         "Ejemplos mínimos: (1) una imagen: {\"path\": \"/tmp/foto.png\", \"question\": \"...\"}. (2) clip de video 12:34->754s: {\"path\": \"/tmp/charla.mp4\", \"question\": \"...\", \"video\": {\"clip_start_seconds\": 754, \"clip_duration_seconds\": 30}}. (3) PDF largo multipass: {\"path\": \"/tmp/manual.pdf\", \"question\": \"...\", \"analysis_mode\": \"multipass\"}. Rutas absolutas del host MCP (en Windows valen `C:/...`; en POSIX lanzarían error).\n / Minimal examples: (1) single image: {\"path\": \"/tmp/shot.png\", \"question\": \"What does each capture show?\"}. (2) video clip 12:34->754s: {\"path\": \"/tmp/talk.mp4\", \"question\": \"What happens at 12:34?\", \"video\": {\"clip_start_seconds\": 754, \"clip_duration_seconds\": 30}}. (3) long PDF multipass: {\"path\": \"/tmp/manual.pdf\", \"question\": \"Summarize each chapter.\", \"analysis_mode\": \"multipass\"}. Absolute MCP-host paths (`C:/...` drive paths only work on a Windows host; POSIX rejects them)." +
-        "Continuación: si la respuesta trae has_more con cursor (segment_summaries_cursor o transcription_segments_cursor), pida el resto con solo cursor (+ offset opcional, por defecto next_offset); con cursor no mande path/paths. / Continuation: when the response carries has_more with a cursor (segment_summaries_cursor or transcription_segments_cursor), ask for the rest with only cursor (+ optional offset, defaults to next_offset); never send path/paths with cursor." +
+        "\n" +
+        "Continuación: si la respuesta trae has_more con cursor (segment_summaries_cursor o transcription_segments_cursor), pida el resto con solo cursor (+ offset opcional, por defecto next_offset; también `limit` opcional 1-100 para acotar la ventana). Con cursor no mande path/paths. / Continuation: when the response carries has_more with a cursor (segment_summaries_cursor or transcription_segments_cursor), ask for the rest with only cursor (+ optional offset, defaults to next_offset; optional `limit` 1-100 bounds the window); never send path/paths with cursor." +
         "\n" +
         "Depuración de capturas de UI: abra con un veredicto de una línea; describa zona por zona; aproxime colores como hex; cuantifique defectos de layout; transcriba etiquetas, botones y errores visibles; compare observado vs esperado cuando aplique. / UI-screenshot debugging (when the media are app screenshots): open with a one-line plain verdict; describe zone by zone (header, sidebar, main content, modals, notifications), not as a general scene; approximate colors as hex values (e.g. #1F6FEB) and name them; quantify layout defects (overflows, clipping, overlaps, misalignments, missing spacing, cut text) estimating pixel magnitudes when possible; transcribe labels, buttons, and any visible error/status text; when the request states what was expected, compare observed vs expected explicitly.",
       inputSchema: {
@@ -696,7 +714,7 @@ export class EnriVisionServer {
           path: {
             type: "string",
             description:
-              "Ruta absoluta a un archivo local en la máquina donde corre el servidor MCP (por ejemplo, C:\\\\Users\\\\User\\\\Downloads\\\\video.mp4), o una URL http(s) de imagen/video/audio/PDF para descargar y analizar (hasta 64 MiB; hosts locales y redes privadas bloqueados). Cuando `paths` trae al menos una entrada válida, `path` se ignora. / Absolute local file path on the machine running this MCP server (e.g. C:\\Users\\User\\Downloads\\video.mp4), or one http(s) URL of image/video/audio/PDF to download and analyze (up to 64 MiB; localhost and private networks blocked)."
+              "Ruta absoluta a un archivo local en la máquina donde corre el servidor MCP (por ejemplo, C:\\\\Users\\\\User\\\\Downloads\\\\video.mp4), o una URL http(s) de imagen/video/audio/PDF para descargar y analizar (hasta 64 MiB; hosts locales y redes privadas bloqueados). Una URL solitaria que excede 64 MiB escala a la ingesta `source_url` del servidor (descarga reanudable del lado de EnriProxy con más hops y techo mayor); los archivos locales usan subida reanudable hasta 4 GiB. Cuando `paths` trae al menos una entrada válida, `path` se ignora. / Absolute local file path on the machine running this MCP server (e.g. C:\\Users\\User\\Downloads\\video.mp4), or one http(s) URL of image/video/audio/PDF to download and analyze (up to 64 MiB; localhost and private networks blocked). A solitary URL above 64 MiB escalates to the server's `source_url` ingestion (resumable server-side download with extra hops and a higher ceiling); local files use resumable upload up to 4 GiB. When `paths` carries at least one valid entry, `path` is ignored."
           },
           paths: {
             type: "array",
@@ -793,9 +811,16 @@ export class EnriVisionServer {
               "Cursor opaco de continuación de una respuesta truncada (segment_summaries_cursor o transcription_segments_cursor). Con cursor NO se sube ni analiza nada: solo lee la siguiente ventana de la lista. No se combina con 'path'/'paths'. / Opaque continuation cursor from a truncated response (segment_summaries_cursor or transcription_segments_cursor). With cursor nothing is uploaded or analyzed: it only reads the next window of the list. Cannot be combined with 'path'/'paths'."
           },
           offset: {
-            type: ["number", "string"],
+            type: "integer",
             description:
               "Índice inicial de la continuación (entero >= 0; por defecto, el next_offset de la respuesta). / Continuation start index (integer >= 0; defaults to the response next_offset)."
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 100,
+            description:
+              "Máximo de entradas a leer en esta continuación (1-100; por defecto el tamaño de ventana del servidor). / Maximum entries to read in this continuation (1-100; defaults to the server window size)."
           },
           video: {
             type: "object",
@@ -1050,7 +1075,7 @@ export class EnriVisionServer {
             description: "Alias plano de clipDurationSeconds (hasta 86400 s). El plano gana sobre el anidado. / Flat alias for clipDurationSeconds (up to 86400 s). Flat wins over nested."
           }
         },
-        anyOf: [{ required: ["path"] }, { required: ["paths"] }]
+        anyOf: [{ required: ["path"] }, { required: ["paths"] }, { required: ["cursor"] }]
       },
       outputSchema: {
         type: "object",
