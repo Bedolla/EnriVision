@@ -152,10 +152,17 @@ export class EnriVisionServer {
         const mapped = EnriVisionServer.mapToolError(
           new Error(`Herramienta desconocida: ${request.params.name} / Unknown tool: ${request.params.name}.`),
         );
+        // Same no-structuredContent contract as the catch path below: error
+        // results must satisfy the tool outputSchema by never carrying one.
+        const retryableText: string = mapped.structuredContent.retryable ? "true" : "false";
         return {
           isError: true,
-          content: [{ type: "text", text: mapped.text }],
-          structuredContent: mapped.structuredContent,
+          content: [
+            {
+              type: "text",
+              text: `${mapped.text} [error-code: ${mapped.structuredContent.code} · retryable: ${retryableText}]`,
+            },
+          ]
         } satisfies CallToolResult;
       }
 
@@ -181,10 +188,21 @@ export class EnriVisionServer {
         } satisfies CallToolResult;
       } catch (error) {
         const mapped = EnriVisionServer.mapToolError(error);
+        // Error results carry NO structuredContent: the tool's outputSchema
+        // describes the SUCCESS shape (analysis/media_type/extraction), and
+        // strict clients (OpenCode) validate any present structuredContent
+        // against it, rejecting error envelopes with -32602. The machine
+        // classification (code/retryable) rides the TEXT instead so models
+        // keep the signal without breaking schema validation.
+        const retryableText: string = mapped.structuredContent.retryable ? "true" : "false";
         return {
           isError: true,
-          content: [{ type: "text", text: mapped.text }],
-          structuredContent: mapped.structuredContent,
+          content: [
+            {
+              type: "text",
+              text: `${mapped.text} [error-code: ${mapped.structuredContent.code} · retryable: ${retryableText}${typeof mapped.structuredContent.httpStatus === "number" ? ` · http-status: ${String(mapped.structuredContent.httpStatus)}` : ""}]`,
+            },
+          ]
         } satisfies CallToolResult;
       }
     });
