@@ -706,6 +706,13 @@ export class EnriVisionServer {
   private getAnalyzeMediaToolDefinition(): Tool {
     return {
       name: "analyze_media",
+      title: "Análisis de medios EnriVision",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      },
       description:
         "Sube y analiza un archivo mediante EnriProxy (extracción del lado servidor + análisis con modelo).\n / Upload and analyze a media file via EnriProxy (server-side extraction + model analysis)." +
         "\n" +
