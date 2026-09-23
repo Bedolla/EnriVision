@@ -16,7 +16,10 @@ This is useful for media types that many MCP clients cannot read reliably (video
   - `POST /v1/uploads`
   - `HEAD /v1/uploads/:id`
   - `PATCH /v1/uploads/:id`
+  - `DELETE /v1/uploads/:id` (best-effort cleanup of orphaned upload sessions)
   - `POST /v1/vision/analyze`
+  - `POST /v1/vision/segments` (cursor continuation for long analyses)
+  - `GET /v1/account/models` (fail-open vision-capability probe before upload)
 - An EnriProxy API key (configured on the EnriProxy side)
 
 ## Install
