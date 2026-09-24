@@ -11,7 +11,16 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import { EnriProxyClient } from "../src/client/EnriProxyClient.js";
 import { MediaUrlFetcher } from "../src/shared/mediaUrlFetcher.js";
@@ -143,7 +152,7 @@ describe("D-A2 clip clamp with warnings", () => {
   it("clamps an overflowing window and warns in Spanish", () => {
     const tool = createStubTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       video: { clip_start_seconds: 86300, clip_duration_seconds: 200 }
     });
     expect(params.video?.clipStartSeconds).toBe(86300);
@@ -156,7 +165,7 @@ describe("D-A2 clip clamp with warnings", () => {
     const tool = createStubTool();
     expect(() =>
       tool.parseParams({
-        path: "C:\\Users\\User\\Downloads\\clip.mp4",
+        path: abs("clip.mp4"),
         video: { clip_start_seconds: 86400, clip_duration_seconds: 200 }
       })
     ).toThrow(/baje el inicio/);

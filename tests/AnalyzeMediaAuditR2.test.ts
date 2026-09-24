@@ -1,7 +1,16 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import { MediaUrlFetcher } from "../src/shared/mediaUrlFetcher.js";
 import { AnalyzeMediaExtractionSanitizer } from "../src/tools/AnalyzeMediaExtractionSanitizer.js";
@@ -10,8 +19,8 @@ import { AnalyzeMediaParamParser } from "../src/tools/AnalyzeMediaParamParser.js
 import { AnalyzeMediaTool } from "../src/tools/AnalyzeMediaTool.js";
 import { EnriVisionServer } from "../src/server/EnriVisionServer.js";
 
-const PNG_PATH = "C:\\Users\\User\\Downloads\\a.png";
-const MP4_PATH = "C:\\Users\\User\\Downloads\\a.mp4";
+const PNG_PATH = abs("a.png");
+const MP4_PATH = abs("a.mp4");
 
 afterEach(() => {
   delete process.env["ENRIVISION_MODEL"];
@@ -35,7 +44,7 @@ describe("Proxy-aligned knob ranges (auditoría Analyze Media R1)", () => {
   it("caps document and image-set knobs at the proxy values", () => {
     const parser = new AnalyzeMediaParamParser();
     const doc = parser.parseParams({
-      path: "C:\\Users\\User\\Downloads\\a.pdf",
+      path: abs("a.pdf"),
       document: {
         max_pages_total: 200,
         pages_per_batch: 200,
@@ -83,7 +92,7 @@ describe("Unknown nested keys (auditoría Analyze Media R1)", () => {
   it("accepts every documented alias spelling", () => {
     const parser = new AnalyzeMediaParamParser();
     const params = parser.parseParams({
-      path: "C:\\Users\\User\\Downloads\\a.pdf",
+      path: abs("a.pdf"),
       document: { max_pages: 10, maxPages: undefined }
     });
     expect(params.document?.maxPagesTotal).toBe(10);

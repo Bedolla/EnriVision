@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import { EnriVisionServer } from "../src/server/EnriVisionServer.js";
 import { ANALYZE_MEDIA_LIMITS } from "../src/tools/AnalyzeMediaContract.js";
@@ -94,7 +103,7 @@ describe("Audit R3 A2: global upload deadline", () => {
 describe("Audit R3 B1: boolean strings", () => {
   it("accepts true/false strings for transcribe and audio.timestamps", () => {
     const tool = createTool();
-    const base = "C:\\Users\\User\\Downloads\\clip.mp4";
+    const base = abs("clip.mp4");
     expect(tool.parseParams({ path: base, transcribe: "true" }).transcribe).toBe(true);
     expect(tool.parseParams({ path: base, transcribe: " False " }).transcribe).toBe(false);
     const audio = tool.parseParams({
@@ -113,7 +122,7 @@ describe("Audit R3 B1: boolean strings", () => {
 describe("Audit R3 B2: flat-wins precedence", () => {
   it("lets flat win and rejects differing nested without flat", () => {
     const tool = createTool();
-    const base = "C:\\Users\\User\\Downloads\\clip.mp4";
+    const base = abs("clip.mp4");
     const won = tool.parseParams({
       path: base,
       segmentSeconds: 100,
@@ -139,13 +148,13 @@ describe("Audit R3 B3: nested spellings and no exponents", () => {
   it("accepts nested documentMaxPages and audioTimestamps, rejects 1e3", () => {
     const tool = createTool();
     const doc = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\a.pdf",
+      path: abs("a.pdf"),
       document: { documentMaxPages: 33 },
     });
     expect(doc.document?.maxPagesTotal).toBe(33);
     expect(() =>
       tool.parseParams({
-        path: "C:\\Users\\User\\Downloads\\clip.mp4",
+        path: abs("clip.mp4"),
         video: { segment_seconds: "1e3" },
       }),
     ).toThrow(/video\.segment_seconds/u);

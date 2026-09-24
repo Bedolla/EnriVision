@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import { EnriProxyHttpError } from "../src/client/EnriProxyClientContract.js";
 import { EnriProxyClient } from "../src/client/EnriProxyClient.js";
@@ -121,23 +130,23 @@ describe("Param parser parity traps (MCP-B3/B7/C4)", () => {
   it("rejects EnriCode-only attachment selectors with a redirect", () => {
     const parser = new AnalyzeMediaParamParser();
     expect(() =>
-      parser.parseParams({ path: "C:\\tmp\\a.png", attachmentIndex: 0 }),
+      parser.parseParams({ path: abs("a.png"), attachmentIndex: 0 }),
     ).toThrow(/attachmentIndex/);
     expect(() =>
-      parser.parseParams({ path: "C:\\tmp\\a.png", attachmentId: "abc" }),
+      parser.parseParams({ path: abs("a.png"), attachmentId: "abc" }),
     ).toThrow(/attachmentIndex|attachmentId/);
   });
 
   it("keeps question optional", () => {
-    const params = new AnalyzeMediaParamParser().parseParams({ path: "C:\\tmp\\a.png" });
+    const params = new AnalyzeMediaParamParser().parseParams({ path: abs("a.png") });
     expect(params.question).toBeUndefined();
   });
 
   it("rejects region together with paths", () => {
     expect(() =>
       new AnalyzeMediaParamParser().parseParams({
-        path: "C:\\tmp\\a.png",
-        paths: ["C:\\tmp\\a.png", "C:\\tmp\\b.png"],
+        path: abs("a.png"),
+        paths: [abs("a.png"), abs("b.png")],
         region: { x: 0, y: 0, width: 0.5, height: 0.5 },
       }),
     ).toThrow(/sólo aplica a una imagen individual/);
@@ -411,7 +420,7 @@ describe("Strict optionalNumber (lote 8/B1)", () => {
     const parser = new AnalyzeMediaParamParser();
     expect(() =>
       parser.parseParams({
-        path: "C:\\Users\\User\\Downloads\\a.mp4",
+        path: abs("a.mp4"),
         video: { clip_start_seconds: "12:34" },
       })
     ).toThrow(/video\.clip_start_seconds.*número/u);
@@ -421,7 +430,7 @@ describe("Strict optionalNumber (lote 8/B1)", () => {
 describe("Proxy-aligned knob bounds (lote 8/B2)", () => {
   it("rejects MCP-only ranges that the proxy would refuse late", () => {
     const parser = new AnalyzeMediaParamParser();
-    const base = "C:\\Users\\User\\Downloads\\a.png";
+    const base = abs("a.png");
     expect(() => parser.parseParams({ paths: [base], images: { images_per_batch: 500 } })).toThrow(
       /images\.images_per_batch.*1.*20/u
     );
@@ -439,7 +448,7 @@ describe("Proxy-aligned knob bounds (lote 8/B2)", () => {
   it("accepts the proxy boundary values", () => {
     const parser = new AnalyzeMediaParamParser();
     const params = parser.parseParams({
-      paths: ["C:\\Users\\User\\Downloads\\a.png"],
+      paths: [abs("a.png")],
       images: { max_images_total: 500, images_per_batch: 20, max_dimension: 4096 },
       document: undefined,
     });
@@ -447,7 +456,7 @@ describe("Proxy-aligned knob bounds (lote 8/B2)", () => {
     expect(params.images?.imagesPerBatch).toBe(20);
     expect(params.images?.maxDimension).toBe(4096);
     const doc = parser.parseParams({
-      path: "C:\\Users\\User\\Downloads\\a.pdf",
+      path: abs("a.pdf"),
       document: {
         max_pages_total: 200,
         pages_per_batch: 200,
@@ -464,7 +473,7 @@ describe("Flat segment-knob conflict (lote 8/B5, paridad EnriCode R3)", () => {
   it("lets a flat maxSegments win over divergent nested video/audio values", () => {
     const parser = new AnalyzeMediaParamParser();
     const params = parser.parseParams({
-      path: "C:\\Users\\User\\Downloads\\a.mp4",
+      path: abs("a.mp4"),
       maxSegments: 60,
       video: { max_segments: 30 },
       audio: { max_segments: 90 },
@@ -477,7 +486,7 @@ describe("Flat segment-knob conflict (lote 8/B5, paridad EnriCode R3)", () => {
     const parser = new AnalyzeMediaParamParser();
     expect(() =>
       parser.parseParams({
-        path: "C:\\Users\\User\\Downloads\\a.mp4",
+        path: abs("a.mp4"),
         video: { max_segments: 30 },
         audio: { max_segments: 40 },
       })

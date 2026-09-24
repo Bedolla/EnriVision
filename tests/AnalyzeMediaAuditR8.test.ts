@@ -10,7 +10,17 @@
  * (C8), and lone-start-at-cap forwarding (C9). M4-B1 (language policy) is
  * held for a product decision and untouched here.
  */
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import { EnriProxyClient } from "../src/client/EnriProxyClient.js";
 import { extractServerErrorDetail } from "../src/client/EnriProxyClientContract.js";
@@ -185,7 +195,7 @@ describe("R8-B3 schema publishes every accepted alias", () => {
 
   it("parses representative alias spellings", () => {
     const parsed = new AnalyzeMediaParamParser().parseParams({
-      path: "C:\\tmp\\a.mp4",
+      path: abs("a.mp4"),
       maxFrames: 6,
       transcriptionLanguage: "es",
       analysisMode: "single",
@@ -341,7 +351,7 @@ describe("R8-C8 tar estimate budgets worst-case basenames", () => {
 describe("R8-C9 lone start at the cap forwards server-decides", () => {
   it("keeps clip_start_seconds 86400 with no clamp warning", () => {
     const parsed = new AnalyzeMediaParamParser().parseParams({
-      path: "C:\\tmp\\a.mp4",
+      path: abs("a.mp4"),
       video: { clip_start_seconds: 86400 },
     });
     expect(parsed.video?.clipStartSeconds).toBe(86400);

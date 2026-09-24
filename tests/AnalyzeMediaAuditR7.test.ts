@@ -19,7 +19,16 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import {
   ACCOUNT_MODELS_PROBE_TIMEOUT_MS,
@@ -274,7 +283,7 @@ describe("F1 language policy: Spanish-first bilingual model surface", () => {
     expect(failure?.message).toContain("Provide 'path'");
 
     const clamped = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       video: { clip_start_seconds: 86300, clip_duration_seconds: 200 },
     });
     expect(clamped.warnings?.[0]).toMatch(/^La ventana pedida/u);
@@ -800,7 +809,7 @@ describe("F18 schema/parser coercion agreement", () => {
     // Round trip: the parser accepts the declared string form.
     const { tool } = createStubTool();
     expect(
-      tool.parseParams({ path: "C:\\Users\\User\\Downloads\\clip.mp4", max_frames: "8" }).maxFrames,
+      tool.parseParams({ path: abs("clip.mp4"), max_frames: "8" }).maxFrames,
     ).toBe(8);
   });
 });
@@ -809,7 +818,7 @@ describe("F19 shared clip-clamp warning", () => {
   it("emits identical Spanish-first warnings on the parser and client paths", async () => {
     const { tool } = createStubTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       video: { clip_start_seconds: 86300, clip_duration_seconds: 200 },
     });
     const direct: string = buildClipWindowClampedWarning(86300, 200, 100, 86400);

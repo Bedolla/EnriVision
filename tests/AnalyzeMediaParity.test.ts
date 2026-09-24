@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import { EnriVisionServer } from "../src/server/EnriVisionServer.js";
 import {
@@ -50,7 +59,7 @@ describe("AnalyzeMedia camelCase and flat aliases", () => {
   it("accepts top-level camelCase spellings", () => {
     const tool = createTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       maxFrames: 7,
       analysisMode: "single",
       transcriptionLanguage: "en",
@@ -64,7 +73,7 @@ describe("AnalyzeMedia camelCase and flat aliases", () => {
   it("prefers flat knobs over nested tuning", () => {
     const tool = createTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       segmentSeconds: 100,
       maxSegments: 11,
       maxFramesPerSegment: 9,
@@ -92,7 +101,7 @@ describe("AnalyzeMedia camelCase and flat aliases", () => {
   it("lets flat segment knobs win over video and audio (EnriCode parity)", () => {
     const tool = createTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       segmentSeconds: 100,
       video: { segment_seconds: 60 },
       audio: { segment_seconds: 45 },
@@ -105,7 +114,7 @@ describe("AnalyzeMedia camelCase and flat aliases", () => {
     const tool = createTool();
     expect(() =>
       tool.parseParams({
-        path: "C:\\Users\\User\\Downloads\\clip.mp4",
+        path: abs("clip.mp4"),
         video: { segment_seconds: 60 },
         audio: { segment_seconds: 45 },
       })
@@ -115,7 +124,7 @@ describe("AnalyzeMedia camelCase and flat aliases", () => {
   it("accepts nested camelCase spellings", () => {
     const tool = createTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       video: { segmentSeconds: 30, maxSegments: 6, maxFramesPerSegment: 3 },
       audio: { segmentSeconds: 30, maxSegments: 6 },
       document: { maxPagesTotal: 7, pagesPerBatch: 3, maxImagesPerBatch: 2 },
@@ -137,7 +146,7 @@ describe("AnalyzeMedia clip_end_seconds", () => {
   it("derives duration as end minus start", () => {
     const tool = createTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       video: { clip_start_seconds: 12, clip_end_seconds: 34 },
     });
 
@@ -148,7 +157,7 @@ describe("AnalyzeMedia clip_end_seconds", () => {
   it("accepts flat clip aliases and synthesizes start 0 (EnriCode parity)", () => {
     const tool = createTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       clipEndSeconds: 30,
     });
 
@@ -158,7 +167,7 @@ describe("AnalyzeMedia clip_end_seconds", () => {
 
   it("rejects inverted windows and out-of-range bounds", () => {
     const tool = createTool();
-    const base = "C:\\Users\\User\\Downloads\\clip.mp4";
+    const base = abs("clip.mp4");
 
     expect(() =>
       tool.parseParams({ path: base, video: { clip_start_seconds: 34, clip_end_seconds: 12 } }),
@@ -181,7 +190,7 @@ describe("AnalyzeMedia clip_end_seconds", () => {
 describe("AnalyzeMedia strict coercion", () => {
   it("rejects fractional integers and non-boolean transcribe", () => {
     const tool = createTool();
-    const base = "C:\\Users\\User\\Downloads\\clip.mp4";
+    const base = abs("clip.mp4");
 
     expect(() => tool.parseParams({ path: base, max_frames: 7.9 })).toThrow(/max_frames/u);
     expect(() => tool.parseParams({ path: base, max_frames: "7.9" })).toThrow(/max_frames/u);
@@ -193,7 +202,7 @@ describe("AnalyzeMedia strict coercion", () => {
 
   it("rejects non-numeric region fractions and overflowing boxes", () => {
     const tool = createTool();
-    const base = "C:\\Users\\User\\Downloads\\shot.png";
+    const base = abs("shot.png");
 
     expect(() =>
       tool.parseParams({ path: base, region: { x: true, y: 0, width: 0.5, height: 0.5 } }),
@@ -209,7 +218,7 @@ describe("AnalyzeMedia strict coercion", () => {
   it("accepts complete numeric strings in region", () => {
     const tool = createTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\shot.png",
+      path: abs("shot.png"),
       region: { x: "0.1", y: 0.2, width: 0.5, height: 0.5 },
     });
 
@@ -220,7 +229,7 @@ describe("AnalyzeMedia strict coercion", () => {
     const tool = createTool();
     const entries: string[] = Array.from(
       { length: ANALYZE_MEDIA_LIMITS.maxPathsCount + 1 },
-      (_unused: unknown, index: number): string => `C:\\Users\\User\\Downloads\\${String(index)}.png`,
+      (_unused: unknown, index: number): string => abs(`${String(index)}.png`),
     );
 
     expect(() => tool.parseParams({ paths: entries })).toThrow(/máximo 100/u);

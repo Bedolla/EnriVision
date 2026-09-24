@@ -3,7 +3,16 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import { EnriProxyClient } from "../src/client/EnriProxyClient.js";
 import { EnriVisionServer } from "../src/server/EnriVisionServer.js";
@@ -52,7 +61,7 @@ describe("AnalyzeMedia R4 clip start synthesis (EV-B1)", () => {
   it("synthesizes clip_start_seconds 0 for end-only windows", () => {
     const tool = createParseTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       video: { clip_end_seconds: 60 },
     });
 
@@ -63,7 +72,7 @@ describe("AnalyzeMedia R4 clip start synthesis (EV-B1)", () => {
   it("synthesizes clip_start_seconds 0 for duration-only windows", () => {
     const tool = createParseTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       video: { clip_duration_seconds: 30 },
     });
 
@@ -74,7 +83,7 @@ describe("AnalyzeMedia R4 clip start synthesis (EV-B1)", () => {
   it("keeps the section absent when no clip knob exists", () => {
     const tool = createParseTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       video: { segment_seconds: 60 },
     });
 
@@ -84,7 +93,7 @@ describe("AnalyzeMedia R4 clip start synthesis (EV-B1)", () => {
 
   it("clamps start + duration windows ending past 86400 with a Spanish warning", () => {
     const tool = createParseTool();
-    const base = "C:\\Users\\User\\Downloads\\clip.mp4";
+    const base = abs("clip.mp4");
 
     // R3 parity arbitration: overflowing windows clamp to the 24 h range
     // (mirroring EnriCode and the proxy timeline trim) instead of failing.
@@ -110,7 +119,7 @@ describe("AnalyzeMedia R4 clip start synthesis (EV-B1)", () => {
 describe("AnalyzeMedia R4 batch-over-total guards (EV-C2)", () => {
   it("rejects pages_per_batch above max_pages_total", () => {
     const tool = createParseTool();
-    const base = "C:\\Users\\User\\Downloads\\doc.pdf";
+    const base = abs("doc.pdf");
 
     expect(() =>
       tool.parseParams({ path: base, document: { max_pages_total: 10, pages_per_batch: 20 } }),
@@ -123,7 +132,7 @@ describe("AnalyzeMedia R4 batch-over-total guards (EV-C2)", () => {
   it("accepts batches within the total", () => {
     const tool = createParseTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\doc.pdf",
+      path: abs("doc.pdf"),
       document: { max_pages_total: 10, pages_per_batch: 10 },
     });
 
@@ -132,7 +141,7 @@ describe("AnalyzeMedia R4 batch-over-total guards (EV-C2)", () => {
 
   it("rejects images_per_batch above max_images_total", () => {
     const tool = createParseTool();
-    const base = "C:\\Users\\User\\Downloads\\a.png";
+    const base = abs("a.png");
 
     expect(() =>
       tool.parseParams({
@@ -146,7 +155,7 @@ describe("AnalyzeMedia R4 batch-over-total guards (EV-C2)", () => {
 describe("AnalyzeMedia R4 region unknown keys (EV-C1)", () => {
   it("rejects region typos instead of zooming the wrong area", () => {
     const tool = createParseTool();
-    const base = "C:\\Users\\User\\Downloads\\shot.png";
+    const base = abs("shot.png");
 
     expect(() =>
       tool.parseParams({

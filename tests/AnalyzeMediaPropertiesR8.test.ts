@@ -19,7 +19,16 @@
  */
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import { describe, expect, it } from "vitest";
 import * as fc from "fast-check";
@@ -270,13 +279,13 @@ describe("parser robustness properties", (): void => {
   it("every schema example parses successfully", (): void => {
     const parser = new AnalyzeMediaParamParser();
     const examples: unknown[] = [
-      { path: "C:/pics/shot.png", question: "What does each capture show?" },
+      { path: abs("shot.png"), question: "What does each capture show?" },
       {
-        path: "C:/vids/talk.mp4",
+        path: abs("talk.mp4"),
         question: "What happens at 12:34?",
         video: { clip_start_seconds: 754, clip_duration_seconds: 30 },
       },
-      { path: "C:/docs/manual.pdf", question: "Summarize each chapter.", analysis_mode: "multipass" },
+      { path: abs("manual.pdf"), question: "Summarize each chapter.", analysis_mode: "multipass" },
     ];
     for (const example of examples) {
       expect((): AnalyzeMediaToolParams => parser.parseParams(example)).not.toThrow();

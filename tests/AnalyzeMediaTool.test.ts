@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+/**
+ * Builds one platform-portable absolute fixture path (release CI runs on
+ * Linux while local development may run on Windows, so hardcoded drive
+ * paths fail path validation before the assertions under test fire).
+ *
+ * @param name - Fixture file name with extension.
+ * @returns Absolute path valid on the host platform.
+ */
+const abs = (name: string): string => resolve(name);
 
 import { AnalyzeMediaTool } from "../src/tools/AnalyzeMediaTool.js";
 import type { MediaUrlFetchResult, MediaUrlFetcher } from "../src/shared/mediaUrlFetcher.js";
@@ -31,7 +40,7 @@ describe("AnalyzeMediaTool.parseParams", () => {
     });
 
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       context: "video",
       question: "What is happening?",
       language: "es",
@@ -95,9 +104,9 @@ describe("AnalyzeMediaTool.parseParams", () => {
     expect(params.path).toBe("https://example.test/pic.png");
 
     const multi = tool.parseParams({
-      paths: ["https://example.test/a.png", "C:\\Users\\User\\Downloads\\b.png"]
+      paths: ["https://example.test/a.png", abs("b.png")]
     });
-    expect(multi.paths).toEqual(["https://example.test/a.png", "C:\\Users\\User\\Downloads\\b.png"]);
+    expect(multi.paths).toEqual(["https://example.test/a.png", abs("b.png")]);
   });
 
   it("rejects invalid analysis_mode values", () => {
@@ -112,7 +121,7 @@ describe("AnalyzeMediaTool.parseParams", () => {
 
     expect(() =>
       tool.parseParams({
-        path: "C:\\Users\\User\\Downloads\\clip.mp4",
+        path: abs("clip.mp4"),
         analysis_mode: "invalid"
       })
     ).toThrow(/analysis_mode/i);
@@ -129,7 +138,7 @@ describe("AnalyzeMediaTool.parseParams", () => {
     });
 
     const params = tool.parseParams({
-      paths: ["C:\\\\Users\\\\User\\\\Downloads\\\\a.png", "C:\\\\Users\\\\User\\\\Downloads\\\\b.png"],
+      paths: [abs("a.png"), abs("b.png")],
       language: "es",
       images: {
         max_images_total: "200",
@@ -156,7 +165,7 @@ describe("AnalyzeMediaTool.parseParams", () => {
     });
 
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\shot.png",
+      path: abs("shot.png"),
       question: "¿qué dice el botón?",
       region: { x: 0.25, y: 0.5, width: 0.5, height: 0.25 }
     });
@@ -165,7 +174,7 @@ describe("AnalyzeMediaTool.parseParams", () => {
 
     expect(() =>
       tool.parseParams({
-        path: "C:\\Users\\User\\Downloads\\shot.png",
+        path: abs("shot.png"),
         question: "q",
         region: { x: 1.5, y: 0, width: 0.5, height: 0.5 }
       })
@@ -173,13 +182,13 @@ describe("AnalyzeMediaTool.parseParams", () => {
 
     expect(() =>
       tool.parseParams({
-        path: "C:\\Users\\User\\Downloads\\shot.png",
+        path: abs("shot.png"),
         question: "q",
         region: { x: 0, y: 0, width: 0, height: 0.5 }
       })
     ).toThrow(/mayores que 0/u);
 
-    const plain = tool.parseParams({ path: "C:\\Users\\User\\Downloads\\shot.png", question: "q" });
+    const plain = tool.parseParams({ path: abs("shot.png"), question: "q" });
     expect(plain.region).toBeUndefined();
   });
 
@@ -449,7 +458,7 @@ describe("AnalyzeMediaTool knob validation", () => {
 
   it("rejects out-of-range knobs with Spanish errors", () => {
     const tool = createTool();
-    const base = "C:\\Users\\User\\Downloads\\clip.mp4";
+    const base = abs("clip.mp4");
 
     expect(() => tool.parseParams({ path: base, max_frames: 0 })).toThrow(/max_frames.*1.*20/u);
     expect(() => tool.parseParams({ path: base, max_frames: 21 })).toThrow(/max_frames.*1.*20/u);
@@ -486,7 +495,7 @@ describe("AnalyzeMediaTool knob validation", () => {
   it("accepts boundary knob values", () => {
     const tool = createTool();
     const params = tool.parseParams({
-      path: "C:\\Users\\User\\Downloads\\clip.mp4",
+      path: abs("clip.mp4"),
       max_frames: 20,
       video: {
         clip_start_seconds: 0,
@@ -524,7 +533,7 @@ describe("AnalyzeMediaTool cancellation", () => {
     controller.abort();
 
     await expect(
-      tool.execute({ path: "C:\\Users\\User\\Downloads\\clip.mp4" }, { signal: controller.signal })
+      tool.execute({ path: abs("clip.mp4") }, { signal: controller.signal })
     ).rejects.toThrow(/cancelada/u);
     expect(createClient).not.toHaveBeenCalled();
   });
