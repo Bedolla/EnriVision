@@ -906,8 +906,12 @@ export class EnriProxyClient {
       throw new Error("La respuesta del servidor es inválida: se esperaba un objeto JSON con 'analysis', 'media_type' y 'extraction'. / Server response is invalid: expected a JSON object with 'analysis', 'media_type', and 'extraction'.");
     }
     const record = raw as Record<string, unknown>;
+    const delivery: unknown = record["delivery"];
+    const isDirect: boolean = delivery === "direct";
     const analysis: unknown = record["analysis"];
-    if (typeof analysis !== "string" || analysis.trim().length === 0) {
+    // Direct-delivery responses carry an intentionally empty `analysis`:
+    // the payload rides `media_blocks` (image data URLs) and `text_blocks`.
+    if (typeof analysis !== "string" || (!isDirect && analysis.trim().length === 0)) {
       throw new Error("La respuesta del servidor es inválida: 'analysis' debe ser texto no vacío. / Server response is invalid: 'analysis' must be non-empty text.");
     }
     const mediaType: unknown = record["media_type"];
@@ -922,15 +926,64 @@ export class EnriProxyClient {
     if (typeof elements !== "undefined" && !Array.isArray(elements)) {
       throw new Error("La respuesta del servidor es inválida: 'elements' debe ser un arreglo de cajas. / Server response is invalid: 'elements' must be an array of boxes.");
     }
+    const rawMediaBlocks: unknown = record["media_blocks"];
+    if (typeof rawMediaBlocks !== "undefined" && !Array.isArray(rawMediaBlocks)) {
+      throw new Error("La respuesta del servidor es inválida: 'media_blocks' debe ser un arreglo. / Server response is invalid: 'media_blocks' must be an array.");
+    }
+    const mediaBlocks = EnriProxyClient.sanitizeDirectMediaBlocks(rawMediaBlocks);
+    const rawTextBlocks: unknown = record["text_blocks"];
+    if (typeof rawTextBlocks !== "undefined" && !Array.isArray(rawTextBlocks)) {
+      throw new Error("La respuesta del servidor es inválida: 'text_blocks' debe ser un arreglo de textos. / Server response is invalid: 'text_blocks' must be an array of texts.");
+    }
+    const textBlocks: ReadonlyArray<string> = Array.isArray(rawTextBlocks)
+      ? rawTextBlocks.filter((entry: unknown): entry is string => typeof entry === "string" && entry.length > 0)
+      : [];
+    if (isDirect && mediaBlocks.length === 0 && textBlocks.length === 0) {
+      throw new Error("La respuesta del servidor es inválida: la entrega directa requiere 'media_blocks' o 'text_blocks'. / Server response is invalid: direct delivery requires 'media_blocks' or 'text_blocks'.");
+    }
+    const model: unknown = record["model"];
+    const requestId: unknown = record["request_id"];
     return {
       analysis,
+      ...(isDirect ? { delivery: "direct" } : {}),
+      ...(mediaBlocks.length > 0 ? { media_blocks: mediaBlocks } : {}),
+      ...(textBlocks.length > 0 ? { text_blocks: textBlocks } : {}),
       media_type: mediaType,
+      ...(typeof model === "string" && model.length > 0 ? { model } : {}),
+      ...(typeof requestId === "string" && requestId.length > 0 ? { request_id: requestId } : {}),
       extraction: (extraction ?? {}) as Record<string, unknown>,
       ...(typeof elements !== "undefined"
         ? { elements: EnriProxyClient.sanitizeAnalyzeElements(elements) }
         : {}),
       ...(typeof localWarnings !== "undefined" && localWarnings.length > 0 ? { warnings: [...localWarnings] } : {}),
     };
+  }
+
+  /**
+   * Sanitizes direct-delivery media blocks defensively.
+   *
+   * @param raw - Raw `media_blocks` value (already type-checked as array or undefined).
+   * @returns Frozen blocks carrying non-empty string `mimeType` and `dataUrl`.
+   */
+  private static sanitizeDirectMediaBlocks(
+    raw: unknown,
+  ): ReadonlyArray<{ readonly mimeType: string; readonly dataUrl: string }> {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const blocks: Array<{ readonly mimeType: string; readonly dataUrl: string }> = [];
+    for (const entry of raw) {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        continue;
+      }
+      const block = entry as Record<string, unknown>;
+      const mimeType: unknown = block["mimeType"];
+      const dataUrl: unknown = block["dataUrl"];
+      if (typeof mimeType === "string" && mimeType.length > 0 && typeof dataUrl === "string" && dataUrl.length > 0) {
+        blocks.push(Object.freeze({ mimeType, dataUrl }));
+      }
+    }
+    return Object.freeze(blocks);
   }
 
   /**

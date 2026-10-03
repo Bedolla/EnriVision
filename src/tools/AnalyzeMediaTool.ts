@@ -354,6 +354,13 @@ export class AnalyzeMediaTool {
 
       const result: AnalyzeMediaToolResult = {
         analysis: analysis.analysis,
+        ...(analysis.delivery === "direct" ? { delivery: "direct" } : {}),
+        ...(Array.isArray(analysis.media_blocks) && analysis.media_blocks.length > 0
+          ? { media_blocks: Object.freeze(analysis.media_blocks.map((block) => Object.freeze({ ...block }))) }
+          : {}),
+        ...(Array.isArray(analysis.text_blocks) && analysis.text_blocks.length > 0
+          ? { text_blocks: Object.freeze([...analysis.text_blocks]) }
+          : {}),
         ...(Array.isArray(analysis.elements) && analysis.elements.length > 0
           ? {
               elements: Object.freeze(
