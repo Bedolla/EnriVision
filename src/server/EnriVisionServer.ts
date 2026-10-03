@@ -275,6 +275,16 @@ export class EnriVisionServer {
     }
     if (typeof status === "number") {
       if (status === 400 || status === 422) {
+        // Server without `source_url` support (coaching parity with
+        // EnriCode): the upstream rejects URL ingestion with a "Clave
+        // desconocida"-class message; translate it into download-first
+        // guidance instead of a generic invalid-input code.
+        if (typeof message === "string" && message.includes("Clave desconocida")) {
+          return {
+            text: `${message}\n\nEste servidor no admite la ingesta de URLs (source_url). Descargue el archivo localmente y envíelo por ruta local, o use un backend con soporte de URL. / This server does not support URL ingestion (source_url). Download the file locally and send it by local path, or use a URL-capable backend.`,
+            structuredContent: { code: ANALYZE_MEDIA_ERROR_CODES.inputInvalid, retryable: false, httpStatus: status },
+          };
+        }
         return {
           text: message,
           structuredContent: { code: ANALYZE_MEDIA_ERROR_CODES.inputInvalid, retryable: false, httpStatus: status },
@@ -772,7 +782,7 @@ export class EnriVisionServer {
           path: {
             type: "string",
             description:
-              "Ruta absoluta a un archivo local en la máquina donde corre el servidor MCP (por ejemplo, C:\\\\Users\\\\User\\\\Downloads\\\\video.mp4), o una URL http(s) de imagen/video/audio/PDF para descargar y analizar (hasta 64 MiB; hosts locales y redes privadas bloqueados). Una URL solitaria que excede 64 MiB escala a la ingesta `source_url` del servidor (descarga reanudable del lado de EnriProxy con más hops y techo mayor); los archivos locales usan subida reanudable hasta 4 GiB. Cuando `paths` trae al menos una entrada válida, `path` se ignora. / Absolute local file path on the machine running this MCP server (e.g. C:\\Users\\User\\Downloads\\video.mp4), or one http(s) URL of image/video/audio/PDF to download and analyze (up to 64 MiB; localhost and private networks blocked). A solitary URL above 64 MiB escalates to the server's `source_url` ingestion (resumable server-side download with extra hops and a higher ceiling); local files use resumable upload up to 4 GiB. When `paths` carries at least one valid entry, `path` is ignored."
+              "Ruta absoluta a un archivo local en la máquina donde corre el servidor MCP (por ejemplo, C:\\\\Users\\\\User\\\\Downloads\\\\video.mp4), o una URL http(s) de imagen/video/audio/PDF para descargar y analizar (hasta 64 MiB; hosts locales y redes privadas bloqueados). Una URL solitaria que excede 64 MiB escala a la ingesta `source_url` del servidor (descarga única del lado de EnriProxy hasta 200 MiB, máximo 3 redirects, 60 s por hop); los archivos locales usan subida reanudable hasta 4 GiB. Cuando `paths` trae al menos una entrada válida, `path` se ignora. / Absolute local file path on the machine running this MCP server (e.g. C:\\Users\\User\\Downloads\\video.mp4), or one http(s) URL of image/video/audio/PDF to download and analyze (up to 64 MiB; localhost and private networks blocked). A solitary URL above 64 MiB escalates to the server's `source_url` ingestion (single server-side download up to 200 MiB, at most 3 redirects, 60 s per hop); local files use resumable upload up to 4 GiB. When `paths` carries at least one valid entry, `path` is ignored."
           },
           paths: {
             type: "array",
@@ -838,6 +848,12 @@ export class EnriVisionServer {
             enum: ["auto", "single", "multipass"],
             description:
               "Alias de analysis_mode (mismo selector, mismos presupuestos). / Alias of analysis_mode (same selector, same budgets)."
+          },
+          delivery: {
+            type: "string",
+            enum: ["auto", "analysis"],
+            description:
+              "Carril de entrega. 'auto' = entrega DIRECTA: el servidor devuelve la media original (o sus fotogramas) como bloques de imagen más el texto/transcripción, SIN análisis lateral — úselo cuando usted (el modelo que llama) puede ver imágenes. 'analysis' (default al omitir) = carril describe: un modelo de visión responde su question sobre la media. Si puede ver imágenes y pide 'auto', NO necesitará descripciones. / Delivery lane. 'auto' = DIRECT delivery: the server returns the original media (or its frames) as image blocks plus text/transcript, WITHOUT lateral analysis — use it when you (the calling model) can see images. 'analysis' (default when omitted) = describe lane: a vision model answers your question about the media. If you can see images and request 'auto', you will NOT need descriptions."
           },
           region: {
             type: "object",

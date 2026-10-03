@@ -193,7 +193,14 @@ export class AnalyzeMediaInputResolver {
             inputs.push(downloaded);
             continue;
           } catch (error: unknown) {
-            if (signal?.aborted !== true && MediaUrlFetcher.isSizeCapError(error)) {
+            if (
+              signal?.aborted !== true &&
+              // Escalation parity with EnriCode: besides the size cap, a
+              // transient fetch failure (network, timeout, DNS) from this
+              // host escalates to the server's `source_url` lane — the
+              // proxy may reach what we cannot.
+              (MediaUrlFetcher.isSizeCapError(error) || MediaUrlFetcher.isRetriableFetchError(error))
+            ) {
               for (const fetched of materialized) {
                 await fetched.cleanup();
               }

@@ -256,6 +256,17 @@ export interface AnalyzeMediaToolParams {
   readonly analysisMode?: "auto" | "single" | "multipass";
 
   /**
+   * Optional delivery lane selector forwarded to EnriProxy.
+   *
+   * @remarks
+   * `"auto"` asks the server for direct delivery (original media or its
+   * frames as image blocks plus text/transcript) when the resolved model
+   * can consume the modality, without a lateral describe completion.
+   * Omitted (or `"analysis"`) keeps the historic describe lane.
+   */
+  readonly delivery?: "auto" | "analysis";
+
+  /**
    * Optional video multipass tuning.
    */
   readonly video?: {

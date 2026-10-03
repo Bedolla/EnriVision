@@ -138,6 +138,7 @@ export class AnalyzeMediaParamParser {
     const analysisMode = this.parseAnalysisMode(
       firstDefined(record["analysis_mode"], record["analysisMode"]),
     );
+    const delivery = this.parseDelivery(record["delivery"]);
     const model = this.parseModelHint(record["model"]);
 
     const region = this.parseRegion(record["region"]);
@@ -173,6 +174,7 @@ export class AnalyzeMediaParamParser {
       transcribe,
       transcriptionLanguage,
       analysisMode,
+      delivery,
       model,
       region,
       video,
@@ -262,6 +264,24 @@ export class AnalyzeMediaParamParser {
       return analysisModeRaw;
     }
     throw new Error("analysis_mode debe ser uno de: auto|single|multipass. / analysis_mode must be one of: auto|single|multipass.");
+  }
+
+  /**
+   * Parses the optional `delivery` lane selector.
+   *
+   * @param raw - Raw selector value.
+   * @returns Validated selector or undefined when absent.
+   * @throws Error with an Spanish-first bilingual message when the value is not auto|analysis.
+   */
+  private parseDelivery(raw: unknown): AnalyzeMediaToolParams["delivery"] {
+    const deliveryRaw = optionalString(raw);
+    if (deliveryRaw === undefined) {
+      return undefined;
+    }
+    if (deliveryRaw === "auto" || deliveryRaw === "analysis") {
+      return deliveryRaw;
+    }
+    throw new Error("delivery debe ser uno de: auto|analysis. / delivery must be one of: auto|analysis.");
   }
 
   /**
@@ -951,6 +971,7 @@ export const TOP_LEVEL_KNOWN_KEYS: ReadonlySet<string> = new Set([
   "transcriptionLanguage",
   "analysis_mode",
   "analysisMode",
+  "delivery",
   "model",
   "region",
   "video",

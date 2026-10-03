@@ -123,6 +123,36 @@ export class MediaUrlFetcher {
   }
 
   /**
+   * Stable retryable-fetch marker embedded in transient network failures
+   * (connection resets, timeouts, DNS faults) thrown by this fetcher.
+   */
+  public static readonly RETRIABLE_FETCH_MARKER = "[ENRIVISION_MEDIA_URL_RETRIABLE]";
+
+  /**
+   * Reports whether an error is a transient, retriable fetch failure.
+   *
+   * @remarks
+   * Used by the input resolver to decide server-side `source_url`
+   * escalation parity with EnriCode: a URL unreachable from this host may
+   * still be reachable by EnriProxy, so transient failures escalate
+   * instead of failing terminally.
+   *
+   * @param error - Unknown caught failure.
+   * @returns True for transient network-class failures.
+   */
+  public static isRetriableFetchError(error: unknown): boolean {
+    if (error instanceof Error && error.message.includes(MediaUrlFetcher.RETRIABLE_FETCH_MARKER)) {
+      return true;
+    }
+    const message: string = error instanceof Error ? error.message : String(error);
+    return (
+      /fetch failed|network error|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|EPROTO|certificate/u.test(
+        message,
+      ) || (error instanceof Error && error.name === "TimeoutError")
+    );
+  }
+
+  /**
    * Download timeout in milliseconds.
    */
   private static readonly TIMEOUT_MS = 60_000;
@@ -321,14 +351,6 @@ export class MediaUrlFetcher {
       throw new Error(`La URL respondió HTTP ${String(response.status)}. / URL answered HTTP ${String(response.status)}.`);
     }
 
-    const declaredLengthHeader: string | null = response.headers.get("content-length");
-    if (
-      declaredLengthHeader !== null &&
-      Number(declaredLengthHeader) > MediaUrlFetcher.MAX_BYTES
-    ) {
-      throw new Error(`El archivo remoto excede el límite de 64 MiB. / ${MediaUrlFetcher.URL_SIZE_CAP_MARKER} Remote file exceeds the 64 MiB limit.`);
-    }
-
     const servedContentType: string = (response.headers.get("content-type") ?? "")
       .split(";", 1)[0]!
       .trim()
@@ -352,6 +374,17 @@ export class MediaUrlFetcher {
       throw new Error(
         `La URL no sirvió un archivo de media válido (content-type: ${servedContentType.length > 0 ? servedContentType : "desconocido"}). Solo se aceptan imagen, video, audio, PDF y documentos de Office. / URL did not serve a valid media file (content-type: ${servedContentType.length > 0 ? servedContentType : "desconocido"}). Only image, video, audio, PDF, and Office documents are accepted.`,
       );
+    }
+    // Type gate BEFORE the size gate: a non-media URL with a huge
+    // content-length must fail fast here instead of escalating to the
+    // server lane (which would download up to its own ceiling before
+    // rejecting).
+    const declaredLengthHeader: string | null = response.headers.get("content-length");
+    if (
+      declaredLengthHeader !== null &&
+      Number(declaredLengthHeader) > MediaUrlFetcher.MAX_BYTES
+    ) {
+      throw new Error(`El archivo remoto excede el límite de 64 MiB. / ${MediaUrlFetcher.URL_SIZE_CAP_MARKER} Remote file exceeds the 64 MiB limit.`);
     }
     const contentType: string = MediaUrlFetcher.isAllowedMediaContentType(servedContentType)
       ? servedContentType

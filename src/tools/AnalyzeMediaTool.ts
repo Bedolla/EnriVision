@@ -330,6 +330,7 @@ export class AnalyzeMediaTool {
         transcribe: params.transcribe,
         transcriptionLanguage: params.transcriptionLanguage,
         analysisMode: params.analysisMode,
+        ...(params.delivery ? { delivery: params.delivery } : {}),
         region: params.region,
         video: params.video,
         document: params.document,

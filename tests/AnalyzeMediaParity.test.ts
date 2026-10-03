@@ -70,6 +70,74 @@ describe("AnalyzeMedia camelCase and flat aliases", () => {
     expect(params.transcriptionLanguage).toBe("en");
   });
 
+  it("parses the delivery lane selector and rejects invalid values", () => {
+    const tool = createTool();
+    const params = tool.parseParams({
+      path: abs("foto.png"),
+      question: "Detalle del encabezado.",
+      delivery: "auto",
+    });
+
+    expect(params.delivery).toBe("auto");
+
+    const omitted = tool.parseParams({
+      path: abs("foto.png"),
+      question: "Detalle del encabezado.",
+    });
+    expect(omitted.delivery).toBeUndefined();
+
+    expect(() =>
+      tool.parseParams({
+        path: abs("foto.png"),
+        question: "Detalle.",
+        delivery: "direct",
+      }),
+    ).toThrow(/delivery debe ser uno de: auto\|analysis/);
+  });
+
+  it("forwards the delivery selector to the EnriProxy client", async () => {
+    const analyzeCalls: Array<Record<string, unknown>> = [];
+    const tool = new AnalyzeMediaTool({
+      createClient: () =>
+        ({
+          createUploadSession: async () => ({
+            upload_id: "upload_1",
+            chunk_size_bytes: 1024,
+            expires_at: Date.now() + 60_000,
+          }),
+          getUploadOffset: async () => 0,
+          appendUploadChunk: async (request: { offset: number; chunk: Buffer }) =>
+            request.offset + request.chunk.length,
+          deleteUploadSession: async () => undefined,
+          analyze: async (request: Record<string, unknown>) => {
+            analyzeCalls.push(request);
+            return { analysis: "ok", media_type: "image", extraction: {} };
+          },
+        }) as never,
+      defaultServerUrl: "http://127.0.0.1:8787",
+      defaultApiKey: "test",
+      defaultTimeoutMs: 30 * 60 * 1000,
+    });
+    const pngBytes: Buffer = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.alloc(64),
+    ]);
+    const fixturePath: string = join(await mkdtemp(join(tmpdir(), "mcp-delivery-")), "foto.png");
+    await writeFile(fixturePath, pngBytes);
+    try {
+      await tool.execute({ path: fixturePath, question: "Detalle.", delivery: "auto" } as never);
+      expect(analyzeCalls.length).toBe(1);
+      expect(analyzeCalls[0]?.["delivery"]).toBe("auto");
+
+      analyzeCalls.length = 0;
+      await tool.execute({ path: fixturePath, question: "Detalle." } as never);
+      expect(analyzeCalls.length).toBe(1);
+      expect(analyzeCalls[0]?.["delivery"]).toBeUndefined();
+    } finally {
+      await rm(join(fixturePath, ".."), { recursive: true, force: true });
+    }
+  });
+
   it("prefers flat knobs over nested tuning", () => {
     const tool = createTool();
     const params = tool.parseParams({
