@@ -787,7 +787,7 @@ export class EnriVisionServer {
           paths: {
             type: "array",
             description:
-              "Rutas absolutas a varios archivos de imagen locales o URLs http(s) (capturas de UI/sets de fotos; cada URL hasta 64 MiB). Cuando se proporcionan, EnriVision sube un único archivo de conjunto para procesamiento por lotes y reducción del lado servidor. Las entradas en blanco se descartan. / Absolute local paths to several image files, or http(s) image URLs (UI screenshots/photo sets; each URL up to 64 MiB). When provided, EnriVision uploads a single set archive for server-side batching + reduce.",
+              "Rutas absolutas a varios archivos de imagen locales o URLs http(s) (capturas de UI/sets de fotos; cada URL hasta 64 MiB). Cuando se proporcionan, EnriVision sube un único archivo de conjunto para procesamiento por lotes y reducción del lado servidor. Las entradas en blanco se descartan. A diferencia de `path` solitario, las URLs de un conjunto NO escalan a source_url: si una imagen excede 64 MiB, analícela sola con `path` (que sí escala hasta 200 MiB server-side) o descárguela primero a un archivo local. / Absolute local paths to several image files, or http(s) image URLs (UI screenshots/photo sets; each URL up to 64 MiB). When provided, EnriVision uploads a single set archive for server-side batching + reduce. Blank entries are discarded. Unlike a solitary `path`, set URLs do NOT escalate to source_url: if one image exceeds 64 MiB, analyze it alone via `path` (which escalates up to 200 MiB server-side) or download it to a local file first.",
             items: {
               type: "string",
               description:
