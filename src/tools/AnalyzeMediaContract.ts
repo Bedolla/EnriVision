@@ -440,6 +440,26 @@ export interface AnalyzeMediaToolResult extends Record<string, unknown> {
   readonly analysis: string;
 
   /**
+   * Delivery lane used by the server.
+   *
+   * @remarks
+   * `"direct"` means the server skipped the lateral completion because the
+   * caller model natively supports the media modality: the media rides the
+   * MCP image content blocks and the extracted text rides `text_blocks`.
+   */
+  readonly delivery?: "analysis" | "direct";
+
+  /**
+   * Media blocks delivered directly (image data URLs).
+   */
+  readonly media_blocks?: ReadonlyArray<{ readonly mimeType: string; readonly dataUrl: string }>;
+
+  /**
+   * Extracted text blocks delivered directly (transcript, document text).
+   */
+  readonly text_blocks?: ReadonlyArray<string>;
+
+  /**
    * Grounded element boxes for image analyses (original-relative [0,1]).
    */
   readonly elements?: ReadonlyArray<AnalyzeMediaElementBox>;

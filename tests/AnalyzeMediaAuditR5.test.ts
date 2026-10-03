@@ -15,6 +15,35 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+/**
+ * Whether this environment can create filesystem symlinks at all.
+ *
+ * @remarks
+ * Windows without developer mode/admin denies symlink creation with EPERM,
+ * so the strict-mode symlink gate cannot be exercised there. CI runs on
+ * Linux where symlinks always work; the test is skipped (with this
+ * documented reason) only when the capability probe fails.
+ */
+const canCreateSymlinks: Promise<boolean> = (async (): Promise<boolean> => {
+  const probeDir: string = await mkdtemp(join(tmpdir(), "enrivision-symlink-probe-"));
+  try {
+    const realPath: string = join(probeDir, "real.png");
+    await writeFile(realPath, new Uint8Array([0x89]));
+    await symlink(realPath, join(probeDir, "link.png"));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await rm(probeDir, { recursive: true, force: true });
+  }
+})();
+
+/**
+ * Synchronous symlink capability resolved once at module load so
+ * `it.skipIf` can consume it without awaiting inside the describe body.
+ */
+const symlinkCapability: boolean = await canCreateSymlinks;
+
 import { MediaUrlFetcher } from "../src/shared/mediaUrlFetcher.js";
 import { TarStream, type TarEntry } from "../src/shared/tar.js";
 import { EnriProxyClient } from "../src/client/EnriProxyClient.js";
@@ -112,7 +141,7 @@ describe("Audit R5 A: strict-mode symlink gate validates the opened handle", () 
     }
   });
 
-  it("rejects symlinked inputs and accepts the real file", async () => {
+  it.skipIf(!symlinkCapability)("rejects symlinked inputs and accepts the real file", async () => {
     const dir: string = await mkdtemp(join(tmpdir(), "enrivision-symlink-"));
     try {
       const realPath: string = join(dir, "shot.png");

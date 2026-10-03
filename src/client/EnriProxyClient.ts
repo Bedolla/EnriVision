@@ -338,6 +338,9 @@ export class EnriProxyClient {
     if (typeof params.model === "string" && params.model.trim()) {
       payload["model"] = params.model.trim();
     }
+    if (params.delivery === "auto" || params.delivery === "analysis") {
+      payload["delivery"] = params.delivery;
+    }
 
     if (typeof params.context === "string" && params.context.trim()) payload["context"] = params.context.trim();
     if (typeof params.question === "string" && params.question.trim()) payload["question"] = params.question.trim();

@@ -49,6 +49,28 @@ export type {
  */
 export class AnalyzeMediaTool {
   /**
+   * Allowlist of accepted media extensions. Anything NOT on this list is
+   * rejected before upload. Media only — text/code files are handled by
+   * the client's Read tool, not by media analysis.
+   */
+  private static readonly ACCEPTED_MEDIA_EXTENSIONS: ReadonlySet<string> = new Set<string>([
+    // Images
+    ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".webp", ".gif", ".bmp",
+    ".tiff", ".tif", ".avif", ".heic", ".heif", ".hif", ".ico", ".cur",
+    ".svg", ".tga", ".exr", ".ppm", ".pnm", ".pgm", ".pbm", ".dng",
+    // Video
+    ".mp4", ".m4v", ".webm", ".mkv", ".mov", ".avi", ".ts", ".mts", ".m2ts",
+    ".3gp", ".3g2", ".flv", ".wmv", ".mpeg", ".mpg", ".vob", ".ogv",
+    ".divx", ".asf", ".rm", ".rmvb", ".mxf",
+    // Audio
+    ".mp3", ".wav", ".m4a", ".m4b", ".m4p", ".ogg", ".opus", ".flac",
+    ".alac", ".aac", ".wma", ".aiff", ".aif", ".aifc", ".au", ".caf",
+    ".mka", ".amr", ".spx", ".wv", ".tta", ".ape", ".dsf", ".dff",
+    // Documents
+    ".pdf", ".docx", ".xlsx", ".pptx", ".jsonl"
+  ]);
+
+  /**
    * Tool dependencies.
    */
   private readonly deps: AnalyzeMediaToolDeps;
@@ -153,6 +175,22 @@ export class AnalyzeMediaTool {
       // URL downloads, even when the region check throws (A1).
       this.rejectRegionForNonImage(params.region, resolved.inputs);
       this.rejectMismatchedTuning(params, resolved.inputs);
+      // Allowlist: only accepted media formats pass. Anything not on the
+      // list is rejected before any upload (operator design: allowlist,
+      // not blocklist — unknown formats default to rejection).
+      if (typeof params.path === "string" && params.path.length > 0 && !params.path.startsWith("http")) {
+        const ext: string = params.path.toLowerCase().match(/\.[^.]+$/u)?.[0] ?? "";
+        if (ext.length > 0 && !AnalyzeMediaTool.ACCEPTED_MEDIA_EXTENSIONS.has(ext)) {
+          throw new Error(
+            `El formato ${ext} no está en la lista de formatos aceptados. / The ${ext} format is not on the accepted list. `
+            + "Imágenes: PNG JPEG WebP GIF BMP TIFF AVIF HEIC ICO SVG DNG. "
+            + "Video: MP4 MKV MOV AVI WebM WMV FLV TS 3GP. "
+            + "Audio: MP3 WAV FLAC OGG M4A AAC WMA AIFF. "
+            + "Documentos: PDF DOCX XLSX PPTX JSONL. "
+            + "Convierte tu archivo. / Convert your file.",
+          );
+        }
+      }
       // Fail-open vision probe (mirrors EnriCode `assertRemoteVisionCapable`):
       // with an explicit visionless model, fail before any session or byte
       // instead of uploading up to 4 GiB first. Only `vision === false`

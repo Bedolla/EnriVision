@@ -171,6 +171,33 @@ export class EnriVisionServer {
         const params = this.analyzeMediaTool.parseParams(args);
         const result = await this.analyzeMediaTool.execute(params, { signal: extra.signal });
 
+        if (result.delivery === "direct" && Array.isArray(result.media_blocks) && result.media_blocks.length > 0) {
+          // Direct lane: the caller model natively sees the media, so the
+          // images ride MCP image content blocks instead of paying a
+          // lateral completion that describes pixels the requester can see.
+          const imageContents: Array<{ type: "image"; data: string; mimeType: string }> = [];
+          for (const block of result.media_blocks) {
+            const base64: string = block.dataUrl.replace(/^data:[^,]*,/u, "");
+            if (base64.length === 0) {
+              continue;
+            }
+            imageContents.push({ type: "image", data: base64, mimeType: block.mimeType });
+          }
+          const noteLines: string[] = [
+            `[Media entregada directamente] ${String(imageContents.length)} ${
+              imageContents.length === 1 ? "bloque de imagen viaja adjunto" : "bloques de imagen viajan adjuntos"
+            }: el modelo activo soporta la modalidad y el servidor omitió la descripción lateral. Observa la media directamente.`,
+          ];
+          for (const textBlock of result.text_blocks ?? []) {
+            noteLines.push(textBlock);
+          }
+          return {
+            isError: false,
+            content: [{ type: "text", text: noteLines.join("\n\n") }, ...imageContents],
+            structuredContent: EnriVisionServer.boundStructuredContent(result),
+          } satisfies CallToolResult;
+        }
+
         return {
           isError: false,
           content: [
@@ -716,7 +743,9 @@ export class EnriVisionServer {
       description:
         "Sube y analiza un archivo mediante EnriProxy (extracción del lado servidor + análisis con modelo).\n / Upload and analyze a media file via EnriProxy (server-side extraction + model analysis)." +
         "\n" +
-        "IMPORTANTE para modelos sin visión: la respuesta es SIEMPRE TEXTO (descripción visual generada del lado del servidor y/o transcripción del audio); nunca se devuelven bloques de imagen, así que CUALQUIER modelo puede consumirla — si no puedes ver imágenes, esta herramienta es tu vía para 'ver' archivos multimedia pidiendo la descripción en `question`.\n / IMPORTANT for models without vision: the response is ALWAYS TEXT (server-side visual description and/or audio transcription); image blocks are never returned, so ANY model can consume it — if you cannot see images, this tool is how you 'see' media by asking for the description in `question`." +
+        "ENTREGA DIRECTA cuando tu modelo ve: si tu modelo activo soporta la modalidad del medio (imagen para imágenes/video/documentos, audio para audios), el servidor OMITE la descripción lateral y la media viaja DIRECTA como bloques de imagen MCP adjuntos (más la transcripción/texto extraído como texto): tú la observas nativamente y `question` solo acompaña como contexto. NO pidas descripciones de lo que puedes ver directamente. `region` (zoom) y otros afinados requieren el carril de descripción.\n / DIRECT DELIVERY when your model can see: if your active model supports the media modality (images for images/video/documents, audio for audio), the server SKIPS the lateral description and the media rides DIRECTLY as attached MCP image blocks (plus extracted transcription/text as text): you observe it natively and `question` only rides as context. `region` (zoom) and other tuning requires the describe lane." +
+        "\n" +
+        "IMPORTANTE para modelos sin visión: en el carril de descripción la respuesta es TEXTO (descripción visual generada del lado del servidor y/o transcripción del audio), así que CUALQUIER modelo puede consumirla — si no puedes ver imágenes, esta herramienta es tu vía para 'ver' archivos multimedia pidiendo la descripción en `question`.\n / IMPORTANT for models without vision: on the describe lane the response is TEXT (server-side visual description and/or audio transcription), so ANY model can consume it — if you cannot see images, this tool is how you 'see' media by asking for the description in `question`." +
         "\n" +
         "Formatos aceptados — Imágenes estáticas: PNG, JPEG, WebP, TIFF, BMP, AVIF, HEIC/HEIF, SVG. Imágenes animadas: GIF animado, WebP animado, APNG, SVG animado (se extraen fotogramas clave y se describen sus cambios). Video: MP4, WebM, MKV, MOV, AVI y cualquier contenedor/códec decodificable, CON o SIN audio (en video con audio se procesan juntos: fotogramas + transcripción sobre la misma línea de tiempo). Audio: WAV, MP3, OGG (Vorbis/Opus), M4A/AAC, FLAC, ALAC, Opus y cualquier formato común (todo se normaliza a WAV 16 kHz mono antes de transcribir). Documentos: PDF (de texto, escaneado o mixto), Word (.docx), Excel (.xlsx), PowerPoint (.pptx) — con texto e imágenes embebidas — y JSONL. Conjuntos de varias imágenes: use `paths`.\n / Accepted formats — Static images: PNG, JPEG, WebP, TIFF, BMP, AVIF, HEIC/HEIF, SVG. Animated images: animated GIF, animated WebP, APNG, animated SVG (key frames are extracted and their changes described). Video: MP4, WebM, MKV, MOV, AVI and any decodable container/codec, WITH or WITHOUT audio (video with audio processes both together: frames + transcription on the same timeline). Audio: WAV, MP3, OGG (Vorbis/Opus), M4A/AAC, FLAC, ALAC, Opus and any common format (everything is normalized to 16 kHz mono WAV before transcription). Documents: PDF (text, scanned, or mixed), Word (.docx), Excel (.xlsx), PowerPoint (.pptx) — with embedded text and images — and JSONL. Multiple-image sets: use `paths`." +
         "\n" +

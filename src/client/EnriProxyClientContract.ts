@@ -89,6 +89,27 @@ export interface AnalyzeVisionResponse {
   readonly analysis: string;
 
   /**
+   * Delivery lane used by the server.
+   *
+   * @remarks
+   * `"direct"` skips the lateral completion: the extracted media rides
+   * `media_blocks` (image data URLs) and the extracted text rides
+   * `text_blocks`, for caller models that natively support the media
+   * modality.
+   */
+  readonly delivery?: "analysis" | "direct";
+
+  /**
+   * Media blocks delivered directly (image data URLs).
+   */
+  readonly media_blocks?: ReadonlyArray<{ readonly mimeType: string; readonly dataUrl: string }>;
+
+  /**
+   * Extracted text blocks delivered directly (transcript, document text).
+   */
+  readonly text_blocks?: ReadonlyArray<string>;
+
+  /**
    * Client-side honesty warnings (for example, a clamped clip window on
    * the direct-client path, which has no parser warning channel).
    */
@@ -401,6 +422,16 @@ export interface AnalyzeVisionParams {
    * (e.g., Muse Spark image-count reroute). Omitted when absent (auto-dispatch).
    */
   readonly model?: string;
+
+  /**
+   * Optional delivery lane selector sent to the server.
+   *
+   * @remarks
+   * `"auto"` asks the server to deliver the extracted media directly when
+   * the caller model natively supports the modality (no lateral
+   * completion). Omitted when absent (historic describe lane).
+   */
+  readonly delivery?: "auto" | "analysis";
 
   /**
    * Optional per-call timeout override for the unary analyze request
