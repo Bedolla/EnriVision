@@ -78,4 +78,21 @@ describe("AnalyzeMediaMcpErrorEnvelope", (): void => {
       : "";
     expect(text).toContain("error-code:");
   });
+
+  it("source_url unknown-key errors keep URL-ingestion coaching; other unknown keys surface verbatim", (): void => {
+    const sourceUrlCase = EnriVisionServer.mapToolError(
+      Object.assign(new Error("Clave desconocida 'source_url' en 'body'. Claves válidas: upload_id."), {
+        status: 400,
+      }),
+    );
+    expect(sourceUrlCase.text).toContain("no admite la ingesta de URLs");
+
+    const deliveryCase = EnriVisionServer.mapToolError(
+      Object.assign(new Error("Clave desconocida 'delivery' en 'body'. Claves válidas: upload_id."), {
+        status: 400,
+      }),
+    );
+    expect(deliveryCase.text).toContain("Clave desconocida 'delivery'");
+    expect(deliveryCase.text).not.toContain("no admite la ingesta de URLs");
+  });
 });

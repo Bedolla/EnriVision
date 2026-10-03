@@ -276,10 +276,16 @@ export class EnriVisionServer {
     if (typeof status === "number") {
       if (status === 400 || status === 422) {
         // Server without `source_url` support (coaching parity with
-        // EnriCode): the upstream rejects URL ingestion with a "Clave
-        // desconocida"-class message; translate it into download-first
-        // guidance instead of a generic invalid-input code.
-        if (typeof message === "string" && message.includes("Clave desconocida")) {
+        // EnriCode): the upstream rejects URL ingestion with an unknown-key
+        // message naming `source_url`; translate that specific shape into
+        // download-first guidance. Any OTHER unknown key (typos, newer
+        // fields like `delivery` on older servers) must surface its real
+        // cause instead of misleading URL-ingestion coaching.
+        if (
+          typeof message === "string" &&
+          message.includes("Clave desconocida") &&
+          message.includes("'source_url'")
+        ) {
           return {
             text: `${message}\n\nEste servidor no admite la ingesta de URLs (source_url). Descargue el archivo localmente y envíelo por ruta local, o use un backend con soporte de URL. / This server does not support URL ingestion (source_url). Download the file locally and send it by local path, or use a URL-capable backend.`,
             structuredContent: { code: ANALYZE_MEDIA_ERROR_CODES.inputInvalid, retryable: false, httpStatus: status },
