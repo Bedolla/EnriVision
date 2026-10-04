@@ -271,7 +271,7 @@ export class AnalyzeMediaInputResolver {
     // must never be uploaded only for the server to reject it.
     if (!MediaUrlFetcher.isAllowedMediaContentType(contentType)) {
       throw new Error(
-        `El archivo local no es media analizable (${localPath}, content-type: ${contentType}). Solo se aceptan imagen, video, audio, PDF y documentos de Office. / Local file is not analyzable media (${localPath}, content-type: ${contentType}). Only image, video, audio, PDF, and Office documents are accepted.`
+        `El archivo local no es media analizable (${localPath}, content-type: ${contentType}). Solo se aceptan imagen, video, audio, PDF, documentos de Office/ODF y archivos de texto (txt, csv, rtf, jsonl). / Local file is not analyzable media (${localPath}, content-type: ${contentType}). Only image, video, audio, PDF, and Office documents are accepted.`
       );
     }
     return {
@@ -322,7 +322,7 @@ export class AnalyzeMediaInputResolver {
     // fails before any upload session exists, never mid-upload.
     if (!MediaUrlFetcher.isAllowedMediaContentType(contentType)) {
       throw new Error(
-        `La URL no sirvió un archivo de media válido (${fetched.localPath}, content-type: ${contentType}). Solo se aceptan imagen, video, audio, PDF y documentos de Office. / URL did not serve a valid media file (${fetched.localPath}, content-type: ${contentType}). Only image, video, audio, PDF, and Office documents are accepted.`
+        `La URL no sirvió un archivo de media válido (${fetched.localPath}, content-type: ${contentType}). Solo se aceptan imagen, video, audio, PDF, documentos de Office/ODF y archivos de texto (txt, csv, rtf, jsonl). / URL did not serve a valid media file (${fetched.localPath}, content-type: ${contentType}). Only image, video, audio, PDF, and Office documents are accepted.`
       );
     }
     return {
@@ -366,6 +366,14 @@ export class AnalyzeMediaInputResolver {
    * @returns MIME type string.
    */
   private detectMimeType(filePath: string): string {
+    // JSONL/NDJSON are promised by the tool description and processed by the
+    // server, but `mime-types` does not table them: without this branch the
+    // detection falls to application/octet-stream and the local gate rejects
+    // the file before any upload.
+    const lowerPath: string = filePath.toLowerCase();
+    if (lowerPath.endsWith(".jsonl") || lowerPath.endsWith(".ndjson")) {
+      return "application/jsonl";
+    }
     const detected = mimeLookup(filePath);
     if (typeof detected === "string" && detected.trim()) {
       return detected.trim();

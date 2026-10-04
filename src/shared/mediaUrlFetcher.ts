@@ -264,7 +264,14 @@ export class MediaUrlFetcher {
     if (match === null) {
       return false;
     }
-    const mapped: string | false = mimeLookup(match[1]!.toLowerCase());
+    const extension: string = match[1]!.toLowerCase();
+    // `mime-types` does not table JSONL/NDJSON, yet the tool description
+    // promises them and the server processes them (DocumentProcessor JSONL
+    // lane), so the extension check honors them explicitly.
+    if (extension === "jsonl" || extension === "ndjson") {
+      return true;
+    }
+    const mapped: string | false = mimeLookup(extension);
     if (typeof mapped !== "string") {
       return false;
     }
@@ -372,7 +379,7 @@ export class MediaUrlFetcher {
         // Best-effort only.
       }
       throw new Error(
-        `La URL no sirvió un archivo de media válido (content-type: ${servedContentType.length > 0 ? servedContentType : "desconocido"}). Solo se aceptan imagen, video, audio, PDF y documentos de Office. / URL did not serve a valid media file (content-type: ${servedContentType.length > 0 ? servedContentType : "desconocido"}). Only image, video, audio, PDF, and Office documents are accepted.`,
+        `La URL no sirvió un archivo de media válido (content-type: ${servedContentType.length > 0 ? servedContentType : "desconocido"}). Solo se aceptan imagen, video, audio, PDF, documentos de Office/ODF y archivos de texto (txt, csv, rtf, jsonl). / URL did not serve a valid media file (content-type: ${servedContentType.length > 0 ? servedContentType : "desconocido"}). Only image, video, audio, PDF, and Office documents are accepted.`,
       );
     }
     // Type gate BEFORE the size gate: a non-media URL with a huge
@@ -1051,6 +1058,8 @@ const ALLOWED_EXACT_CONTENT_TYPES: ReadonlySet<string> = new Set([
   "application/rtf",
   "text/csv",
   "text/plain",
+  "application/jsonl",
+  "application/x-ndjson",
   "application/vnd.ms-powerpoint",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

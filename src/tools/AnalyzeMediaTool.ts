@@ -352,6 +352,16 @@ export class AnalyzeMediaTool {
         extraction["request_id"] = analysis.request_id;
       }
 
+      // Honest degradation notice: `delivery: "auto"` silently falls back to
+      // the describe lane when EnriProxy cannot resolve the caller model as
+      // capable of the media modality (unknown `model` id, blind registry
+      // entry). A silent fallback makes callers retry direct delivery or
+      // mistrust the tool, so the mismatch is surfaced as a warning.
+      const deliveryDegradedWarning: string | null =
+        params.delivery === "auto" && analysis.delivery !== "direct"
+          ? "Se pidió delivery=auto pero el servidor respondió con el carril de descripción: EnriProxy no reconoce al modelo llamador como capaz de la modalidad (verifique el parámetro `model` o env ENRIVISION_MODEL con un id registrado en /v1/account/models). / delivery=auto was requested but the server answered on the describe lane: EnriProxy does not recognize the caller model as capable of the modality (check the `model` param or env ENRIVISION_MODEL against an id registered in /v1/account/models)."
+          : null;
+
       const result: AnalyzeMediaToolResult = {
         analysis: analysis.analysis,
         ...(analysis.delivery === "direct" ? { delivery: "direct" } : {}),
@@ -371,13 +381,14 @@ export class AnalyzeMediaTool {
             }
           : {}),
         media_type: analysis.media_type,
-        ...((params.warnings && params.warnings.length > 0) || transcribeWarning || remoteAdvisoryWarnings.length > 0 || (analysis.warnings && analysis.warnings.length > 0)
+        ...((params.warnings && params.warnings.length > 0) || transcribeWarning || remoteAdvisoryWarnings.length > 0 || (analysis.warnings && analysis.warnings.length > 0) || deliveryDegradedWarning !== null
           ? {
               warnings: [
                 ...(params.warnings ?? []),
                 ...(transcribeWarning ? [transcribeWarning] : []),
                 ...remoteAdvisoryWarnings,
                 ...(analysis.warnings ?? []),
+                ...(deliveryDegradedWarning ? [deliveryDegradedWarning] : []),
               ],
             }
           : {}),
