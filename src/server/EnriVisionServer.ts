@@ -969,6 +969,10 @@ export class EnriVisionServer {
                 type: ["integer", "string"],
                 description: "Número máximo de páginas a analizar en total (entero 1-200; por defecto 20). Más páginas = más costo y tiempo; omita para pocas páginas. / Max pages to analyze in total (integer 1-200; default 20). More pages = more cost and time; omit for few pages."
               },
+              start_page: {
+                type: ["integer", "string"],
+                description: "Primera página (base 1) de la ventana de análisis (entero 1-100000): se analizan las páginas [start_page, start_page + max_pages_total). Para PDFs largos, continúe llamando con start_page = última página analizada + 1 (la respuesta reporta last_page_analyzed y remaining_after_window). Un start_page mayor que el total de páginas se rechaza con 400. / 1-based first page of the analysis window (integer 1-100000): pages [start_page, start_page + max_pages_total) are analyzed. For long PDFs, continue calling with start_page = last analyzed page + 1 (the response reports last_page_analyzed and remaining_after_window). A start_page beyond the document's page count is rejected with 400."
+              },
               pages_per_batch: {
                 type: ["integer", "string"],
                 description: "Páginas por lote para las llamadas map de multipass (entero 1-200). Lotes chicos = más llamadas pero menos memoria; omita para el valor del servidor. / Pages per batch for multipass map calls (integer 1-200). Smaller batches = more calls but less memory; omit for the server value."
@@ -985,6 +989,14 @@ export class EnriVisionServer {
               maxPagesTotal: {
                 type: ["integer", "string"],
                 description: "Alias de max_pages_total (entero 1-200; por defecto 20). El plano gana sobre el anidado. / Alias of max_pages_total (integer 1-200; default 20). Flat wins over nested."
+              },
+              startPage: {
+                type: ["integer", "string"],
+                description: "Alias de start_page (entero 1-100000). El plano documentStartPage gana. / Alias of start_page (integer 1-100000). Flat documentStartPage wins."
+              },
+              documentStartPage: {
+                type: ["integer", "string"],
+                description: "Alias plano de start_page (entero 1-100000); el plano gana sobre el anidado. / Flat alias of start_page (integer 1-100000); flat wins over nested."
               },
               max_pages: {
                 type: ["integer", "string"],

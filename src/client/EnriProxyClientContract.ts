@@ -286,6 +286,12 @@ export interface EnriProxyDocumentTuning {
   readonly maxPagesTotal?: number;
 
   /**
+   * 1-based first page of the analysis window (pages
+   * [startPage, startPage + maxPagesTotal) are analyzed).
+   */
+  readonly startPage?: number;
+
+  /**
    * Pages per batch.
    */
   readonly pagesPerBatch?: number;

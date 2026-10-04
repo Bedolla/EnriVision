@@ -449,6 +449,15 @@ export class EnriProxyClient {
       if (typeof maxPagesTotal !== "undefined") {
         documentPayload["max_pages_total"] = maxPagesTotal;
       }
+      const startPage: number | undefined = EnriProxyClient.requireOptionalInt(
+        params.document.startPage,
+        "document.start_page",
+        1,
+        100_000,
+      );
+      if (typeof startPage !== "undefined") {
+        documentPayload["start_page"] = startPage;
+      }
       const pagesPerBatch: number | undefined = EnriProxyClient.requireOptionalInt(
         params.document.pagesPerBatch,
         "document.pages_per_batch",

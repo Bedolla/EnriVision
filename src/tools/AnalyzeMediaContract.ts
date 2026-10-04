@@ -313,6 +313,13 @@ export interface AnalyzeMediaToolParams {
     readonly maxPagesTotal?: number;
 
     /**
+     * 1-based first page of the analysis window (integer 1-100000, mirrors
+     * EnriProxy): pages [startPage, startPage + maxPagesTotal) are analyzed
+     * so long PDFs stay reachable across continuation calls.
+     */
+    readonly startPage?: number;
+
+    /**
      * Pages per batch (integer 1-200, mirrors EnriProxy).
      */
     readonly pagesPerBatch?: number;

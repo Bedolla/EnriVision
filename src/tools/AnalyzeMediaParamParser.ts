@@ -570,6 +570,18 @@ export class AnalyzeMediaParamParser {
         1,
         200,
       ),
+      startPage: this.parseBoundedInt(
+        firstDefined(
+          flat["documentStartPage"],
+          flat["document_start_page"],
+          nested["start_page"],
+          nested["startPage"],
+          nested["documentStartPage"],
+        ),
+        "document.start_page",
+        1,
+        100_000,
+      ),
       pagesPerBatch: this.parseBoundedInt(
         firstDefined(nested["pages_per_batch"], nested["pagesPerBatch"]),
         "document.pages_per_batch",
@@ -1027,6 +1039,9 @@ export const DOCUMENT_KNOWN_KEYS: ReadonlySet<string> = new Set([
   "maxPages",
   "documentMaxPages",
   "document_max_pages",
+  "start_page",
+  "startPage",
+  "documentStartPage",
   "pages_per_batch",
   "pagesPerBatch",
   "max_images_per_batch",
