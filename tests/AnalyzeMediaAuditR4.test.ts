@@ -162,7 +162,7 @@ describe("AnalyzeMedia R4 region unknown keys (EV-C1)", () => {
         path: base,
         region: { x: 0, y: 0, width: 0.5, height: 0.5, widh: 0.1 },
       }),
-    ).toThrow(/desconocidas/u);
+    ).toThrow(/Parámetro no reconocido dentro de 'region': widh/u);
   });
 });
 

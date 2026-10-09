@@ -17,13 +17,19 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { URL } from "node:url";
 
-import { buildClipWindowClampedWarning, optionalFraction, optionalInt, optionalNumber } from "../shared/validation.js";
+import {
+  assertOptionalEnum,
+  buildClipWindowClampedWarning,
+  optionalFraction,
+  optionalInt,
+  optionalNumber,
+} from "../shared/validation.js";
 import {
   AUDIO_KNOWN_KEYS,
   DOCUMENT_KNOWN_KEYS,
   IMAGES_KNOWN_KEYS,
   VIDEO_KNOWN_KEYS,
-} from "../tools/AnalyzeMediaParamParser.js";
+} from "../tools/AnalyzeMediaKnownKeys.js";
 
 import {
   EnriProxyHttpError,
@@ -690,12 +696,8 @@ export class EnriProxyClient {
    * @throws Error with a Spanish-first bilingual message on the first defect.
    */
   public static requirePreUploadTuning(params: AnalyzeVisionParams): void {
-    if (typeof params.analysisMode === "string" && params.analysisMode.trim()) {
-      const mode: string = params.analysisMode.trim();
-      if (mode !== "auto" && mode !== "single" && mode !== "multipass") {
-        throw new Error("analysis_mode debe ser uno de: auto|single|multipass. / analysis_mode must be one of: auto|single|multipass.");
-      }
-    }
+    assertOptionalEnum(params.analysisMode, "analysis_mode", ["auto", "single", "multipass"]);
+    assertOptionalEnum(params.delivery, "delivery", ["auto", "analysis"]);
     EnriProxyClient.requireLanguageHint(params.language, "language");
     EnriProxyClient.requireLanguageHint(params.transcriptionLanguage, "transcription_language");
     EnriProxyClient.requireKnownSectionKeys(params.video, VIDEO_KNOWN_KEYS, "video");
@@ -731,6 +733,10 @@ export class EnriProxyClient {
   /**
    * Rejects unknown keys inside one tuning section.
    *
+   * @remarks
+   * Mirrors the parser's canonical coaching so both surfaces coach with the
+   * same "Parámetro no reconocido dentro de '<section>'" wording.
+   *
    * @param section - Candidate section object.
    * @param knownKeys - Parser-owned accepted spellings.
    * @param sectionName - Section name for error messages.
@@ -750,8 +756,10 @@ export class EnriProxyClient {
     }
     const unknown: string[] = Object.keys(section).filter((key: string): boolean => !knownKeys.has(key));
     if (unknown.length > 0) {
+      const keysList: string = unknown.join(", ");
+      const accepted: string = [...knownKeys].join(", ");
       throw new Error(
-        `${sectionName} tiene claves desconocidas (${unknown.join(", ")}): revise la escritura. / ${sectionName} has unknown keys (${unknown.join(", ")}): check the spelling.`
+        `Parámetro no reconocido dentro de '${sectionName}': ${keysList}. Parámetros aceptados (${sectionName}): ${accepted}. / Unknown parameter in '${sectionName}': ${keysList}. Accepted parameters (${sectionName}): ${accepted}.`
       );
     }
   }
@@ -1145,8 +1153,9 @@ export class EnriProxyClient {
       (key: string): boolean => key !== "x" && key !== "y" && key !== "width" && key !== "height",
     );
     if (unknownKeys.length > 0) {
+      const keysList: string = unknownKeys.join(", ");
       throw new Error(
-        `region trae claves desconocidas (${unknownKeys.join(", ")}): se rechazan. Claves válidas: x, y, width, height. / region has unknown keys (${unknownKeys.join(", ")}): they are rejected. Valid keys: x, y, width, height.`
+        `Parámetro no reconocido dentro de 'region': ${keysList}. Parámetros aceptados (region): x, y, width, height. / Unknown parameter in 'region': ${keysList}. Accepted parameters (region): x, y, width, height.`
       );
     }
     const readFraction = (value: unknown, fieldName: string): number => {

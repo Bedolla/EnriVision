@@ -5,6 +5,17 @@
  * knob ranges, so out-of-range values fail locally in Spanish instead of
  * being silently clamped by EnriProxy.
  *
+ * Anti-hallucination bar (nothing the model sends is dropped quietly):
+ * - Unknown keys fail at every level with the canonical coaching
+ *   "Parámetro no reconocido: <keys>. Parámetros aceptados: <real list>".
+ * - Closed enums (`analysis_mode`, `delivery`) reject every present non-null
+ *   value that is not exactly one of the valid selectors (non-strings
+ *   included); `null` and blank strings count as absent.
+ * - Two spellings of the same knob with DIFFERENT values fail (send a
+ *   single spelling); equal duplicates resolve to that value.
+ * - The documented flat-over-nested precedence applies with a Spanish
+ *   honesty warning when both levels arrive with different values.
+ *
  * Enforced knob contract (documented in the MCP tool schema, mirrors EnriProxy `VisionAnalysisHandler`):
  * - max_frames (or maxFrames): integer 1-20 (default 20)
  * - analysis_mode (or analysisMode): auto|single|multipass
@@ -35,18 +46,44 @@ import { MediaUrlFetcher } from "../shared/mediaUrlFetcher.js";
 import {
   assertObject,
   assertOptionalBoolean,
+  assertOptionalEnum,
   assertOptionalString,
   buildClipWindowClampedWarning,
   optionalFraction,
   optionalInt,
   optionalNumber,
-  optionalString,
 } from "../shared/validation.js";
 import type {
   AnalyzeMediaToolParams,
   ImageRegion,
 } from "./AnalyzeMediaContract.js";
 import { ANALYZE_MEDIA_LIMITS } from "./AnalyzeMediaContract.js";
+import {
+  AUDIO_KNOWN_KEYS,
+  DOCUMENT_KNOWN_KEYS,
+  IMAGES_KNOWN_KEYS,
+  MAX_SOURCE_URL_CHARS,
+  REGION_KNOWN_KEYS,
+  TOP_LEVEL_KNOWN_KEYS,
+  VIDEO_KNOWN_KEYS,
+} from "./AnalyzeMediaKnownKeys.js";
+import type { AliasCandidate } from "./AnalyzeMediaAliasResolution.js";
+import {
+  aliasValuesEqual,
+  firstDefined,
+  hasAnyValue,
+  resolveAliasedCandidate,
+  resolveFlatOverNestedCandidate,
+} from "./AnalyzeMediaAliasResolution.js";
+
+export {
+  AUDIO_KNOWN_KEYS,
+  DOCUMENT_KNOWN_KEYS,
+  IMAGES_KNOWN_KEYS,
+  REGION_KNOWN_KEYS,
+  TOP_LEVEL_KNOWN_KEYS,
+  VIDEO_KNOWN_KEYS,
+};
 
 /**
  * Validates raw `analyze_media` tool arguments.
@@ -89,7 +126,7 @@ export class AnalyzeMediaParamParser {
       );
     }
 
-    this.throwOnUnknownKeys(record, TOP_LEVEL_KNOWN_KEYS, "argumentos");
+    this.throwOnUnknownKeys(record, TOP_LEVEL_KNOWN_KEYS, "argumentos", "top-level");
 
     const path: string | undefined = this.parsePath(record["path"]);
     const paths: string[] | undefined = this.parsePaths(record["paths"]);
@@ -121,7 +158,10 @@ export class AnalyzeMediaParamParser {
       "language",
     );
     const maxFrames = this.parseBoundedInt(
-      firstDefined(record["max_frames"], record["maxFrames"]),
+      this.resolveTopLevelKnob("max_frames", [
+        { key: "max_frames", value: record["max_frames"] },
+        { key: "maxFrames", value: record["maxFrames"] },
+      ]),
       "max_frames",
       1,
       20,
@@ -129,14 +169,20 @@ export class AnalyzeMediaParamParser {
     const transcribe = assertOptionalBoolean(record["transcribe"], "transcribe");
     const transcriptionLanguage = this.parseLanguageHint(
       assertOptionalString(
-        firstDefined(record["transcription_language"], record["transcriptionLanguage"]),
+        this.resolveTopLevelKnob("transcription_language", [
+          { key: "transcription_language", value: record["transcription_language"] },
+          { key: "transcriptionLanguage", value: record["transcriptionLanguage"] },
+        ]),
         "transcription_language",
       ),
       "transcription_language",
     );
 
     const analysisMode = this.parseAnalysisMode(
-      firstDefined(record["analysis_mode"], record["analysisMode"]),
+      this.resolveTopLevelKnob("analysis_mode", [
+        { key: "analysis_mode", value: record["analysis_mode"] },
+        { key: "analysisMode", value: record["analysisMode"] },
+      ]),
     );
     const delivery = this.parseDelivery(record["delivery"]);
     const model = this.parseModelHint(record["model"]);
@@ -224,7 +270,7 @@ export class AnalyzeMediaParamParser {
       typeof flatSegmentSeconds === "undefined"
       && typeof nestedVideoSegment !== "undefined"
       && typeof nestedAudioSegment !== "undefined"
-      && !numbersEqual(nestedVideoSegment, nestedAudioSegment)
+      && !aliasValuesEqual(nestedVideoSegment, nestedAudioSegment)
     ) {
       throw new Error(
         "video.segment_seconds y audio.segment_seconds difieren sin un plano segmentSeconds que gane; use el plano segmentSeconds o solo uno de los dos objetos. / video.segment_seconds and audio.segment_seconds differ without a flat segmentSeconds winner; use the flat segmentSeconds or only one of the two objects."
@@ -236,7 +282,7 @@ export class AnalyzeMediaParamParser {
       typeof flatMaxSegments === "undefined"
       && typeof nestedVideoMax !== "undefined"
       && typeof nestedAudioMax !== "undefined"
-      && !numbersEqual(nestedVideoMax, nestedAudioMax)
+      && !aliasValuesEqual(nestedVideoMax, nestedAudioMax)
     ) {
       throw new Error(
         "video.max_segments y audio.max_segments difieren sin un plano maxSegments que gane; use el plano maxSegments o solo uno de los dos objetos. / video.max_segments and audio.max_segments differ without a flat maxSegments winner; use the flat maxSegments or only one of the two objects."
@@ -247,41 +293,35 @@ export class AnalyzeMediaParamParser {
   /**
    * Parses the `analysis_mode` selector accepting both spellings.
    *
+   * @remarks
+   * Strict enum: a present non-null value that is not exactly one of the
+   * valid selectors (non-strings included) fails with coaching instead of
+   * being silently dropped to the default; `null` and blank strings count
+   * as absent.
+   *
    * @param raw - Raw selector value.
    * @returns Validated selector or undefined when absent.
    * @throws Error with an Spanish-first bilingual message when the value is not auto|single|multipass.
    */
   private parseAnalysisMode(raw: unknown): AnalyzeMediaToolParams["analysisMode"] {
-    const analysisModeRaw = optionalString(raw);
-    if (analysisModeRaw === undefined) {
-      return undefined;
-    }
-    if (
-      analysisModeRaw === "auto" ||
-      analysisModeRaw === "single" ||
-      analysisModeRaw === "multipass"
-    ) {
-      return analysisModeRaw;
-    }
-    throw new Error("analysis_mode debe ser uno de: auto|single|multipass. / analysis_mode must be one of: auto|single|multipass.");
+    return assertOptionalEnum(raw, "analysis_mode", ["auto", "single", "multipass"]);
   }
 
   /**
    * Parses the optional `delivery` lane selector.
+   *
+   * @remarks
+   * Strict enum: a present non-null value that is not exactly one of the
+   * valid selectors (non-strings included) fails with coaching instead of
+   * being silently dropped to the default; `null` and blank strings count
+   * as absent.
    *
    * @param raw - Raw selector value.
    * @returns Validated selector or undefined when absent.
    * @throws Error with an Spanish-first bilingual message when the value is not auto|analysis.
    */
   private parseDelivery(raw: unknown): AnalyzeMediaToolParams["delivery"] {
-    const deliveryRaw = optionalString(raw);
-    if (deliveryRaw === undefined) {
-      return undefined;
-    }
-    if (deliveryRaw === "auto" || deliveryRaw === "analysis") {
-      return deliveryRaw;
-    }
-    throw new Error("delivery debe ser uno de: auto|analysis. / delivery must be one of: auto|analysis.");
+    return assertOptionalEnum(raw, "delivery", ["auto", "analysis"]);
   }
 
   /**
@@ -438,25 +478,50 @@ export class AnalyzeMediaParamParser {
   private parseVideo(raw: unknown, flat: Record<string, unknown>, applySharedFlats: boolean): AnalyzeMediaToolParams["video"] | undefined {
     const nested: Record<string, unknown> =
       typeof raw === "undefined" ? {} : (assertObject(raw, "video") as Record<string, unknown>);
-    this.throwOnUnknownKeys(nested, VIDEO_KNOWN_KEYS, "video");
+    this.throwOnUnknownKeys(nested, VIDEO_KNOWN_KEYS, "video", "nested");
     const clipStartSeconds = this.parseClipBound(
-      firstDefined(flat["clipStartSeconds"], flat["clip_start_seconds"], nested["clip_start_seconds"], nested["clipStartSeconds"]),
+      this.resolveFlatOverNestedKnob(
+        "video.clip_start_seconds",
+        [
+          { key: "clipStartSeconds", value: flat["clipStartSeconds"] },
+          { key: "clip_start_seconds", value: flat["clip_start_seconds"] },
+        ],
+        [
+          { key: "clip_start_seconds", value: nested["clip_start_seconds"] },
+          { key: "clipStartSeconds", value: nested["clipStartSeconds"] },
+        ],
+      ),
       "video.clip_start_seconds",
       0,
       ANALYZE_MEDIA_LIMITS.maxClipSeconds,
     );
     const clipEndSeconds = this.parseClipBound(
-      firstDefined(flat["clipEndSeconds"], flat["clip_end_seconds"], nested["clip_end_seconds"], nested["clipEndSeconds"]),
+      this.resolveFlatOverNestedKnob(
+        "video.clip_end_seconds",
+        [
+          { key: "clipEndSeconds", value: flat["clipEndSeconds"] },
+          { key: "clip_end_seconds", value: flat["clip_end_seconds"] },
+        ],
+        [
+          { key: "clip_end_seconds", value: nested["clip_end_seconds"] },
+          { key: "clipEndSeconds", value: nested["clipEndSeconds"] },
+        ],
+      ),
       "video.clip_end_seconds",
       0,
       ANALYZE_MEDIA_LIMITS.maxClipSeconds,
     );
     let clipDurationSeconds = this.parseClipDuration(
-      firstDefined(
-        flat["clipDurationSeconds"],
-        flat["clip_duration_seconds"],
-        nested["clip_duration_seconds"],
-        nested["clipDurationSeconds"],
+      this.resolveFlatOverNestedKnob(
+        "video.clip_duration_seconds",
+        [
+          { key: "clipDurationSeconds", value: flat["clipDurationSeconds"] },
+          { key: "clip_duration_seconds", value: flat["clip_duration_seconds"] },
+        ],
+        [
+          { key: "clip_duration_seconds", value: nested["clip_duration_seconds"] },
+          { key: "clipDurationSeconds", value: nested["clipDurationSeconds"] },
+        ],
       ),
     );
     if (clipEndSeconds !== undefined) {
@@ -509,26 +574,57 @@ export class AnalyzeMediaParamParser {
       clipDurationSeconds,
       segmentSeconds: this.parseBoundedNumber(
         applySharedFlats
-          ? firstDefined(flat["segmentSeconds"], flat["segment_seconds"], nested["segment_seconds"], nested["segmentSeconds"])
-          : firstDefined(nested["segment_seconds"], nested["segmentSeconds"]),
+          ? this.resolveFlatOverNestedKnob(
+              "video.segment_seconds",
+              [
+                { key: "segmentSeconds", value: flat["segmentSeconds"] },
+                { key: "segment_seconds", value: flat["segment_seconds"] },
+              ],
+              [
+                { key: "segment_seconds", value: nested["segment_seconds"] },
+                { key: "segmentSeconds", value: nested["segmentSeconds"] },
+              ],
+            )
+          : this.resolveNestedKnob("video.segment_seconds", [
+              { key: "segment_seconds", value: nested["segment_seconds"] },
+              { key: "segmentSeconds", value: nested["segmentSeconds"] },
+            ]),
         "video.segment_seconds",
         5,
         600,
       ),
       maxSegments: this.parseBoundedInt(
         applySharedFlats
-          ? firstDefined(flat["maxSegments"], flat["max_segments"], nested["max_segments"], nested["maxSegments"])
-          : firstDefined(nested["max_segments"], nested["maxSegments"]),
+          ? this.resolveFlatOverNestedKnob(
+              "video.max_segments",
+              [
+                { key: "maxSegments", value: flat["maxSegments"] },
+                { key: "max_segments", value: flat["max_segments"] },
+              ],
+              [
+                { key: "max_segments", value: nested["max_segments"] },
+                { key: "maxSegments", value: nested["maxSegments"] },
+              ],
+            )
+          : this.resolveNestedKnob("video.max_segments", [
+              { key: "max_segments", value: nested["max_segments"] },
+              { key: "maxSegments", value: nested["maxSegments"] },
+            ]),
         "video.max_segments",
         1,
         60,
       ),
       maxFramesPerSegment: this.parseBoundedInt(
-        firstDefined(
-          flat["maxFramesPerSegment"],
-          flat["max_frames_per_segment"],
-          nested["max_frames_per_segment"],
-          nested["maxFramesPerSegment"],
+        this.resolveFlatOverNestedKnob(
+          "video.max_frames_per_segment",
+          [
+            { key: "maxFramesPerSegment", value: flat["maxFramesPerSegment"] },
+            { key: "max_frames_per_segment", value: flat["max_frames_per_segment"] },
+          ],
+          [
+            { key: "max_frames_per_segment", value: nested["max_frames_per_segment"] },
+            { key: "maxFramesPerSegment", value: nested["maxFramesPerSegment"] },
+          ],
         ),
         "video.max_frames_per_segment",
         1,
@@ -553,49 +649,68 @@ export class AnalyzeMediaParamParser {
   private parseDocument(raw: unknown, flat: Record<string, unknown>): AnalyzeMediaToolParams["document"] | undefined {
     const nested: Record<string, unknown> =
       typeof raw === "undefined" ? {} : (assertObject(raw, "document") as Record<string, unknown>);
-    this.throwOnUnknownKeys(nested, DOCUMENT_KNOWN_KEYS, "document");
+    this.throwOnUnknownKeys(nested, DOCUMENT_KNOWN_KEYS, "document", "nested");
     const parsed = {
       maxPagesTotal: this.parseBoundedInt(
-        firstDefined(
-          flat["documentMaxPages"],
-          flat["document_max_pages"],
-          nested["max_pages_total"],
-          nested["maxPagesTotal"],
-          nested["max_pages"],
-          nested["maxPages"],
-          nested["documentMaxPages"],
-          nested["document_max_pages"],
+        this.resolveFlatOverNestedKnob(
+          "document.max_pages_total",
+          [
+            { key: "documentMaxPages", value: flat["documentMaxPages"] },
+            { key: "document_max_pages", value: flat["document_max_pages"] },
+          ],
+          [
+            { key: "max_pages_total", value: nested["max_pages_total"] },
+            { key: "maxPagesTotal", value: nested["maxPagesTotal"] },
+            { key: "max_pages", value: nested["max_pages"] },
+            { key: "maxPages", value: nested["maxPages"] },
+            { key: "documentMaxPages", value: nested["documentMaxPages"] },
+            { key: "document_max_pages", value: nested["document_max_pages"] },
+          ],
         ),
         "document.max_pages_total",
         1,
         200,
       ),
       startPage: this.parseBoundedInt(
-        firstDefined(
-          flat["documentStartPage"],
-          flat["document_start_page"],
-          nested["start_page"],
-          nested["startPage"],
-          nested["documentStartPage"],
+        this.resolveFlatOverNestedKnob(
+          "document.start_page",
+          [
+            { key: "documentStartPage", value: flat["documentStartPage"] },
+            { key: "document_start_page", value: flat["document_start_page"] },
+          ],
+          [
+            { key: "start_page", value: nested["start_page"] },
+            { key: "startPage", value: nested["startPage"] },
+            { key: "documentStartPage", value: nested["documentStartPage"] },
+          ],
         ),
         "document.start_page",
         1,
         100_000,
       ),
       pagesPerBatch: this.parseBoundedInt(
-        firstDefined(nested["pages_per_batch"], nested["pagesPerBatch"]),
+        this.resolveNestedKnob("document.pages_per_batch", [
+          { key: "pages_per_batch", value: nested["pages_per_batch"] },
+          { key: "pagesPerBatch", value: nested["pagesPerBatch"] },
+        ]),
         "document.pages_per_batch",
         1,
         200,
       ),
       maxImagesPerBatch: this.parseBoundedInt(
-        firstDefined(nested["max_images_per_batch"], nested["maxImagesPerBatch"]),
+        this.resolveNestedKnob("document.max_images_per_batch", [
+          { key: "max_images_per_batch", value: nested["max_images_per_batch"] },
+          { key: "maxImagesPerBatch", value: nested["maxImagesPerBatch"] },
+        ]),
         "document.max_images_per_batch",
         0,
         20,
       ),
       scannedTextThresholdChars: this.parseBoundedInt(
-        firstDefined(nested["scanned_text_threshold_chars"], nested["scannedTextThresholdChars"]),
+        this.resolveNestedKnob("document.scanned_text_threshold_chars", [
+          { key: "scanned_text_threshold_chars", value: nested["scanned_text_threshold_chars"] },
+          { key: "scannedTextThresholdChars", value: nested["scannedTextThresholdChars"] },
+        ]),
         "document.scanned_text_threshold_chars",
         0,
         5000,
@@ -634,30 +749,61 @@ export class AnalyzeMediaParamParser {
   private parseAudio(raw: unknown, flat: Record<string, unknown>, applySharedFlats: boolean): AnalyzeMediaToolParams["audio"] | undefined {
     const nested: Record<string, unknown> =
       typeof raw === "undefined" ? {} : (assertObject(raw, "audio") as Record<string, unknown>);
-    this.throwOnUnknownKeys(nested, AUDIO_KNOWN_KEYS, "audio");
+    this.throwOnUnknownKeys(nested, AUDIO_KNOWN_KEYS, "audio", "nested");
     const parsed = {
       timestamps: assertOptionalBoolean(
-        firstDefined(
-          flat["audioTimestamps"],
-          flat["audio_timestamps"],
-          nested["timestamps"],
-          nested["audioTimestamps"],
-          nested["audio_timestamps"],
+        this.resolveFlatOverNestedKnob(
+          "audio.timestamps",
+          [
+            { key: "audioTimestamps", value: flat["audioTimestamps"] },
+            { key: "audio_timestamps", value: flat["audio_timestamps"] },
+          ],
+          [
+            { key: "timestamps", value: nested["timestamps"] },
+            { key: "audioTimestamps", value: nested["audioTimestamps"] },
+            { key: "audio_timestamps", value: nested["audio_timestamps"] },
+          ],
         ),
         "audio.timestamps",
       ),
       segmentSeconds: this.parseBoundedNumber(
         applySharedFlats
-          ? firstDefined(flat["segmentSeconds"], flat["segment_seconds"], nested["segment_seconds"], nested["segmentSeconds"])
-          : firstDefined(nested["segment_seconds"], nested["segmentSeconds"]),
+          ? this.resolveFlatOverNestedKnob(
+              "audio.segment_seconds",
+              [
+                { key: "segmentSeconds", value: flat["segmentSeconds"] },
+                { key: "segment_seconds", value: flat["segment_seconds"] },
+              ],
+              [
+                { key: "segment_seconds", value: nested["segment_seconds"] },
+                { key: "segmentSeconds", value: nested["segmentSeconds"] },
+              ],
+            )
+          : this.resolveNestedKnob("audio.segment_seconds", [
+              { key: "segment_seconds", value: nested["segment_seconds"] },
+              { key: "segmentSeconds", value: nested["segmentSeconds"] },
+            ]),
         "audio.segment_seconds",
         5,
         600,
       ),
       maxSegments: this.parseBoundedInt(
         applySharedFlats
-          ? firstDefined(flat["maxSegments"], flat["max_segments"], nested["max_segments"], nested["maxSegments"])
-          : firstDefined(nested["max_segments"], nested["maxSegments"]),
+          ? this.resolveFlatOverNestedKnob(
+              "audio.max_segments",
+              [
+                { key: "maxSegments", value: flat["maxSegments"] },
+                { key: "max_segments", value: flat["max_segments"] },
+              ],
+              [
+                { key: "max_segments", value: nested["max_segments"] },
+                { key: "maxSegments", value: nested["maxSegments"] },
+              ],
+            )
+          : this.resolveNestedKnob("audio.max_segments", [
+              { key: "max_segments", value: nested["max_segments"] },
+              { key: "maxSegments", value: nested["maxSegments"] },
+            ]),
         "audio.max_segments",
         1,
         60,
@@ -679,22 +825,31 @@ export class AnalyzeMediaParamParser {
     }
     const value = assertObject(raw, "images");
     const record = value as Record<string, unknown>;
-    this.throwOnUnknownKeys(record, IMAGES_KNOWN_KEYS, "images");
+    this.throwOnUnknownKeys(record, IMAGES_KNOWN_KEYS, "images", "nested");
     const parsed = {
       maxImagesTotal: this.parseBoundedInt(
-        firstDefined(record["max_images_total"], record["maxImagesTotal"]),
+        this.resolveNestedKnob("images.max_images_total", [
+          { key: "max_images_total", value: record["max_images_total"] },
+          { key: "maxImagesTotal", value: record["maxImagesTotal"] },
+        ]),
         "images.max_images_total",
         1,
         500,
       ),
       imagesPerBatch: this.parseBoundedInt(
-        firstDefined(record["images_per_batch"], record["imagesPerBatch"]),
+        this.resolveNestedKnob("images.images_per_batch", [
+          { key: "images_per_batch", value: record["images_per_batch"] },
+          { key: "imagesPerBatch", value: record["imagesPerBatch"] },
+        ]),
         "images.images_per_batch",
         1,
         20,
       ),
       maxDimension: this.parseBoundedInt(
-        firstDefined(record["max_dimension"], record["maxDimension"]),
+        this.resolveNestedKnob("images.max_dimension", [
+          { key: "max_dimension", value: record["max_dimension"] },
+          { key: "maxDimension", value: record["maxDimension"] },
+        ]),
         "images.max_dimension",
         256,
         4096,
@@ -715,28 +870,94 @@ export class AnalyzeMediaParamParser {
   }
 
   /**
-   * Rejects unknown keys inside one nested tuning object with Spanish coaching.
+   * Rejects unknown keys with the canonical unrecognized-parameter coaching.
    *
    * @remarks
    * Typos (`max_pages_totall`, `segement_seconds`) must fail locally instead
-   * of being ignored silently and analyzing the whole file at full cost.
+   * of being ignored silently and analyzing the whole file at full cost. The
+   * message format matches the EnriWeb bar: "Parámetro no reconocido:
+   * <keys>. Parámetros aceptados: <real list>".
    *
-   * @param actual - Raw nested tuning object.
-   * @param known - Accepted key spellings for the section.
+   * @param actual - Raw object keys.
+   * @param known - Accepted key spellings for the scope.
    * @param section - Section name for error messages.
-   * @throws Error with an Spanish-first bilingual message when the section carries unknown keys.
+   * @param scope - Whether the keys sit at the top level or inside a section.
+   * @throws Error with an Spanish-first bilingual message when the scope carries unknown keys.
    */
   private throwOnUnknownKeys(
     actual: Record<string, unknown>,
     known: ReadonlySet<string>,
     section: string,
+    scope: "top-level" | "nested",
   ): void {
     const unknown: string[] = Object.keys(actual).filter((key: string): boolean => !known.has(key));
     if (unknown.length > 0) {
-      throw new Error(
-        `${section} trae claves desconocidas (${unknown.join(", ")}): se rechazan. Claves válidas: ${[...known].join(", ")}. / ${section} has unknown keys (${unknown.join(", ")}): they are rejected. Valid keys: ${[...known].join(", ")}.`
-      );
+      const keysList: string = unknown.join(", ");
+      const accepted: string = [...known].join(", ");
+      const message: string =
+        scope === "top-level"
+          ? `Parámetro no reconocido: ${keysList}. Parámetros aceptados: ${accepted}. / Unknown parameter: ${keysList}. Accepted parameters: ${accepted}.`
+          : `Parámetro no reconocido dentro de '${section}': ${keysList}. Parámetros aceptados (${section}): ${accepted}. / Unknown parameter in '${section}': ${keysList}. Accepted parameters (${section}): ${accepted}.`;
+      throw new Error(message);
     }
+  }
+
+  /**
+   * Resolves one knob among its same-level top-level spellings.
+   *
+   * @param fieldName - Canonical field name for error messages.
+   * @param candidates - Top-level spellings with their raw values.
+   * @returns Winning raw value, or undefined when absent.
+   * @throws Error with an Spanish-first bilingual message when two spellings carry different values.
+   */
+  private resolveTopLevelKnob(fieldName: string, candidates: readonly AliasCandidate[]): unknown {
+    return resolveAliasedCandidate(fieldName, candidates)?.value;
+  }
+
+  /**
+   * Resolves one knob among its same-level nested spellings.
+   *
+   * @param fieldName - Dotted field name for error messages.
+   * @param candidates - Nested spellings with their raw values.
+   * @returns Winning raw value, or undefined when absent.
+   * @throws Error with an Spanish-first bilingual message when two spellings carry different values.
+   */
+  private resolveNestedKnob(fieldName: string, candidates: readonly AliasCandidate[]): unknown {
+    return resolveAliasedCandidate(fieldName, candidates)?.value;
+  }
+
+  /**
+   * Resolves one knob applying the documented flat-over-nested precedence.
+   *
+   * @remarks
+   * Each level first collapses its own spellings (conflicting duplicates
+   * fail); the flat winner then beats the nested winner. When both arrive
+   * with different values, a Spanish honesty warning is recorded (the
+   * flat-wins precedence is documented in the tool schema, so the call
+   * proceeds but the model still learns which value applied).
+   *
+   * @param fieldName - Dotted field name for error/warning messages.
+   * @param flatCandidates - Flat-level spellings with their raw values.
+   * @param nestedCandidates - Nested-level spellings with their raw values.
+   * @returns Winning raw value, or undefined when absent.
+   * @throws Error with an Spanish-first bilingual message when same-level spellings carry different values.
+   */
+  private resolveFlatOverNestedKnob(
+    fieldName: string,
+    flatCandidates: readonly AliasCandidate[],
+    nestedCandidates: readonly AliasCandidate[],
+  ): unknown {
+    const flatWinner: AliasCandidate | undefined = resolveAliasedCandidate(fieldName, flatCandidates);
+    const nestedWinner: AliasCandidate | undefined = resolveAliasedCandidate(fieldName, nestedCandidates);
+    const resolution = resolveFlatOverNestedCandidate(
+      fieldName,
+      flatWinner ?? { key: "(flat)", value: undefined },
+      nestedWinner ?? { key: "(nested)", value: undefined },
+    );
+    if (resolution.warning !== null) {
+      this.parseWarnings.push(resolution.warning);
+    }
+    return resolution.winner?.value;
   }
 
   /**
@@ -900,7 +1121,7 @@ export class AnalyzeMediaParamParser {
     const record = raw as Record<string, unknown>;
     // A typo such as `widh` would otherwise be ignored and zoom the wrong
     // area: reject unknown keys like every other tuning section.
-    this.throwOnUnknownKeys(record, REGION_KNOWN_KEYS, "region");
+    this.throwOnUnknownKeys(record, REGION_KNOWN_KEYS, "region", "nested");
     const readFraction = (fieldName: string): number => {
       const parsed: number | undefined = optionalFraction(record[fieldName]);
       if (typeof parsed === "undefined" || parsed < 0 || parsed > 1) {
@@ -952,183 +1173,3 @@ export class AnalyzeMediaParamParser {
   }
 }
 
-/**
- * Accepted top-level argument keys (documented params plus every accepted flat alias).
- *
- * @remarks
- * Unknown top-level keys fail in Spanish listing the valid keys, so typos
- * (`max_frams`, `questoin`) never analyze a whole file at full cost.
- */
-/**
- * Maximum `source_url` characters the proxy ingests (EnriProxy
- * `VISION_MAX_SOURCE_URL_CHARS`): longer URLs fail here, before any byte
- * travels, instead of failing at the server after cost.
- */
-const MAX_SOURCE_URL_CHARS = 2048;
-
-/**
- * Accepted top-level argument keys (exported for the schema-parser
- * agreement test: every key here must exist as an `inputSchema` property).
- */
-export const TOP_LEVEL_KNOWN_KEYS: ReadonlySet<string> = new Set([
-  "path",
-  "paths",
-  "context",
-  "question",
-  "language",
-  "max_frames",
-  "maxFrames",
-  "transcribe",
-  "transcription_language",
-  "transcriptionLanguage",
-  "analysis_mode",
-  "analysisMode",
-  "delivery",
-  "model",
-  "region",
-  "video",
-  "audio",
-  "document",
-  "images",
-  "segmentSeconds",
-  "segment_seconds",
-  "maxSegments",
-  "max_segments",
-  "maxFramesPerSegment",
-  "max_frames_per_segment",
-  "audioTimestamps",
-  "audio_timestamps",
-  "documentMaxPages",
-  "document_max_pages",
-  "clipStartSeconds",
-  "clip_start_seconds",
-  "clipEndSeconds",
-  "clip_end_seconds",
-  "clipDurationSeconds",
-  "clip_duration_seconds",
-  "cursor",
-  "offset",
-  "limit",
-]);
-
-/**
- * Accepted key spellings inside the `video` tuning object (snake_case + camelCase).
- */
-export const VIDEO_KNOWN_KEYS: ReadonlySet<string> = new Set([
-  "clip_start_seconds",
-  "clipStartSeconds",
-  "clip_end_seconds",
-  "clipEndSeconds",
-  "clip_duration_seconds",
-  "clipDurationSeconds",
-  "segment_seconds",
-  "segmentSeconds",
-  "max_segments",
-  "maxSegments",
-  "max_frames_per_segment",
-  "maxFramesPerSegment",
-]);
-
-/**
- * Accepted key spellings inside the `document` tuning object (snake_case + camelCase + legacy aliases).
- */
-export const DOCUMENT_KNOWN_KEYS: ReadonlySet<string> = new Set([
-  "max_pages_total",
-  "maxPagesTotal",
-  "max_pages",
-  "maxPages",
-  "documentMaxPages",
-  "document_max_pages",
-  "start_page",
-  "startPage",
-  "documentStartPage",
-  "pages_per_batch",
-  "pagesPerBatch",
-  "max_images_per_batch",
-  "maxImagesPerBatch",
-  "scanned_text_threshold_chars",
-  "scannedTextThresholdChars",
-]);
-
-/**
- * Accepted key spellings inside the `audio` tuning object (snake_case + camelCase).
- */
-export const AUDIO_KNOWN_KEYS: ReadonlySet<string> = new Set([
-  "timestamps",
-  "audioTimestamps",
-  "audio_timestamps",
-  "segment_seconds",
-  "segmentSeconds",
-  "max_segments",
-  "maxSegments",
-]);
-
-/**
- * Accepted key spellings inside the `region` zoom object.
- */
-export const REGION_KNOWN_KEYS: ReadonlySet<string> = new Set([
-  "x",
-  "y",
-  "width",
-  "height",
-]);
-
-/**
- * Accepted key spellings inside the `images` tuning object (snake_case + camelCase).
- */
-export const IMAGES_KNOWN_KEYS: ReadonlySet<string> = new Set([
-  "max_images_total",
-  "maxImagesTotal",
-  "images_per_batch",
-  "imagesPerBatch",
-  "max_dimension",
-  "maxDimension",
-]);
-
-/**
- * Returns the first defined candidate, used for snake_case/camelCase and flat/nested aliases.
- *
- * @param candidates - Alias values in precedence order.
- * @returns First defined value or undefined when all are absent.
- */
-function firstDefined(...candidates: readonly unknown[]): unknown {
-  for (const candidate of candidates) {
-    if (typeof candidate !== "undefined") {
-      return candidate;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Reports whether a parsed tuning object carries at least one defined knob.
- *
- * @param parsed - Parsed tuning object with optional knobs.
- * @returns True when at least one knob is defined.
- */
-function hasAnyValue(parsed: Record<string, unknown>): boolean {
-  return Object.values(parsed).some((value: unknown): boolean => typeof value !== "undefined");
-}
-
-/**
- * Compares two raw knob values for the nested-conflict guard.
- *
- * @remarks
- * Numeric strings (`"60"` vs `60`) count as equal so the guard only fires
- * on genuinely different budgets, mirroring the EnriCode numeric coercion.
- *
- * @param left - First raw value.
- * @param right - Second raw value.
- * @returns True when both describe the same number or identical strings.
- */
-function numbersEqual(left: unknown, right: unknown): boolean {
-  if (left === right) {
-    return true;
-  }
-  const leftNumber: number | undefined = optionalNumber(left);
-  const rightNumber: number | undefined = optionalNumber(right);
-  if (typeof leftNumber !== "undefined" && typeof rightNumber !== "undefined") {
-    return leftNumber === rightNumber;
-  }
-  return false;
-}

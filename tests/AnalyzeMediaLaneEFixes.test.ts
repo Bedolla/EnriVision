@@ -60,7 +60,9 @@ describe("Param parser strictness (laneE-B1/B2/B3/B10)", () => {
   const img: string = absFixture("lanee.png");
 
   it("rejects unknown top-level keys listing the valid keys", () => {
-    expect(() => parser.parseParams({ path: img, max_frams: 5 })).toThrow(/desconocidas.*max_frames/iu);
+    expect(() => parser.parseParams({ path: img, max_frams: 5 })).toThrow(
+      /Parámetro no reconocido: max_frams\. Parámetros aceptados: .*max_frames/u
+    );
   });
 
   it("rejects present non-string path with a type error", () => {

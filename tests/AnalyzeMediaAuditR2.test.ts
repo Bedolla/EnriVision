@@ -77,15 +77,15 @@ describe("Unknown nested keys (auditoría Analyze Media R1)", () => {
     const parser = new AnalyzeMediaParamParser();
     expect(() =>
       parser.parseParams({ path: MP4_PATH, video: { segement_seconds: 60 } })
-    ).toThrow(/video.*desconocidas.*segement_seconds/u);
+    ).toThrow(/Parámetro no reconocido dentro de 'video': segement_seconds/u);
     expect(() =>
       parser.parseParams({ path: PNG_PATH, document: { max_pages_totall: 10 } })
-    ).toThrow(/document.*desconocidas.*max_pages_totall/u);
+    ).toThrow(/Parámetro no reconocido dentro de 'document': max_pages_totall/u);
     expect(() => parser.parseParams({ path: MP4_PATH, audio: { foo: 1 } })).toThrow(
-      /audio.*desconocidas/u
+      /Parámetro no reconocido dentro de 'audio': foo/u
     );
     expect(() => parser.parseParams({ paths: [PNG_PATH], images: { bar: 1 } })).toThrow(
-      /images.*desconocidas/u
+      /Parámetro no reconocido dentro de 'images': bar/u
     );
   });
 

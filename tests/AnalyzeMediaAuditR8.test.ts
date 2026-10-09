@@ -234,7 +234,7 @@ describe("R8-B4 direct client enforces parser ranges pre-upload", () => {
         uploadId: "u",
         region: { x: 0, y: 0, width: 0.5, height: 0.5, widh: 0.5 },
       } as never),
-    ).rejects.toThrow(/claves desconocidas.*widh/u);
+    ).rejects.toThrow(/Parámetro no reconocido dentro de 'region': widh/u);
   });
 });
 

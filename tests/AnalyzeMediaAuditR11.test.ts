@@ -167,10 +167,10 @@ describe("Analyze Media R11 M4-B4: direct-client guards mirror the parser", (): 
     ).toThrow("language debe ser un código de idioma");
     expect((): void =>
       EnriProxyClient.requirePreUploadTuning({ video: { clip_start_seconds: 1, bogus_knob: 2 } } as never),
-    ).toThrow("video tiene claves desconocidas");
+    ).toThrow("Parámetro no reconocido dentro de 'video': bogus_knob");
     expect((): void =>
       EnriProxyClient.requirePreUploadTuning({ images: { max_images_totall: 5 } } as never),
-    ).toThrow("images tiene claves desconocidas");
+    ).toThrow("Parámetro no reconocido dentro de 'images': max_images_totall");
     expect((): void =>
       EnriProxyClient.requirePreUploadTuning({ analysisMode: "auto", language: "es" } as never),
     ).not.toThrow();

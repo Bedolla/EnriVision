@@ -182,6 +182,48 @@ export function assertOptionalBoolean(value: unknown, fieldName: string): boolea
 }
 
 /**
+ * Validates an optional closed-enum selector, failing on anything that is
+ * not absent, null, blank, or one of the valid values.
+ *
+ * @remarks
+ * Strict by design: non-string values (`5`, `true`, `{}`) and unknown
+ * strings (`"turbo"`) fail with a Spanish coaching error instead of being
+ * silently dropped to the default (the hallucinated-parameter class).
+ * `null` and blank strings count as absent, mirroring the repo-wide
+ * blank-string knob convention.
+ *
+ * @param value - Raw selector value.
+ * @param fieldName - Field name for error messages.
+ * @param validValues - Accepted selector values.
+ * @returns Trimmed valid selector, or undefined when absent.
+ * @throws Error with an Spanish-first bilingual message when present but invalid.
+ */
+export function assertOptionalEnum<T extends string>(
+  value: unknown,
+  fieldName: string,
+  validValues: readonly T[],
+): T | undefined {
+  if (typeof value === "undefined" || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(
+      `${fieldName} debe ser uno de: ${validValues.join("|")}. / ${fieldName} must be one of: ${validValues.join("|")}.`
+    );
+  }
+  const trimmed: string = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if ((validValues as readonly string[]).includes(trimmed)) {
+    return trimmed as T;
+  }
+  throw new Error(
+    `${fieldName} debe ser uno de: ${validValues.join("|")}. / ${fieldName} must be one of: ${validValues.join("|")}.`
+  );
+}
+
+/**
  * Parses a relative [0,1] fraction from a number or a complete numeric string.
  *
  * @remarks
