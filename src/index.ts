@@ -7,8 +7,7 @@
  * @module index
  */
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { EnriProxyClient } from "./client/EnriProxyClient.js";
 import { AnalyzeMediaTool } from "./tools/AnalyzeMediaTool.js";
 import { EnriVisionServer } from "./server/EnriVisionServer.js";

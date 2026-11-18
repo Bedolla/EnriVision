@@ -9,9 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { EnriVisionServer } from "../src/server/EnriVisionServer.js";
 import type { AnalyzeMediaTool, AnalyzeMediaToolResult } from "../src/tools/AnalyzeMediaContract.js";
 

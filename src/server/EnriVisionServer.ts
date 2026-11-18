@@ -7,15 +7,8 @@
  * @module server/EnriVisionServer
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  type CallToolResult,
-  type Tool
-} from "@modelcontextprotocol/sdk/types.js";
-
+import { Server } from "@modelcontextprotocol/server";
+import type { CallToolResult, Tool, Transport } from "@modelcontextprotocol/server";
 import type { AnalyzeMediaTool } from "../tools/AnalyzeMediaTool.js";
 import {
   ANALYZE_MEDIA_ERROR_CODES,
@@ -143,11 +136,11 @@ export class EnriVisionServer {
   private registerToolHandlers(): void {
     const analyzeMediaDefinition = this.getAnalyzeMediaToolDefinition();
 
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    this.server.setRequestHandler("tools/list", async () => {
       return { tools: [analyzeMediaDefinition] };
     });
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    this.server.setRequestHandler("tools/call", async (request, ctx) => {
       if (request.params.name !== "analyze_media") {
         const mapped = EnriVisionServer.mapToolError(
           new Error(`Herramienta desconocida: ${request.params.name} / Unknown tool: ${request.params.name}.`),
@@ -169,7 +162,7 @@ export class EnriVisionServer {
       try {
         const args = request.params.arguments ?? {};
         const params = this.analyzeMediaTool.parseParams(args);
-        const result = await this.analyzeMediaTool.execute(params, { signal: extra.signal });
+        const result = await this.analyzeMediaTool.execute(params, { signal: ctx.mcpReq.signal });
 
         if (result.delivery === "direct" && Array.isArray(result.media_blocks) && result.media_blocks.length > 0) {
           // Direct lane: the caller model natively sees the media, so the

@@ -31,6 +31,15 @@ import { AnalyzeMediaTool } from "../src/tools/AnalyzeMediaTool.js";
 /** Bounded per-property runs (validation contract: about 2,000). */
 const NUM_RUNS: number = 2_000;
 
+/**
+ * Timeout for properties that touch the real filesystem on every run.
+ *
+ * Each run resolves two staged identities, so the 2,000-run contract needs
+ * several seconds on its own and exceeds the 5,000 ms default once the suite
+ * runs in parallel.
+ */
+const IO_PROPERTY_TIMEOUT_MS: number = 60_000;
+
 describe("Analyze Media R9 MCP properties: Spanish-first warnings", () => {
   it("leads every transcribe warning in Spanish with a separator", () => {
     const tool = new AnalyzeMediaTool({} as never);
@@ -101,7 +110,7 @@ describe("Analyze Media R9 MCP properties: staged identities", () => {
       }),
       { numRuns: NUM_RUNS }
     );
-  });
+  }, IO_PROPERTY_TIMEOUT_MS);
 
   it("distinguishes files that share size but not identity", async () => {
     await fc.assert(
@@ -119,7 +128,7 @@ describe("Analyze Media R9 MCP properties: staged identities", () => {
       ),
       { numRuns: NUM_RUNS }
     );
-  });
+  }, IO_PROPERTY_TIMEOUT_MS);
 
   it("keeps describeFileIdentity pure and size-sensitive", () => {
     fc.assert(
